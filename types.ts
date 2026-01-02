@@ -1,0 +1,92 @@
+export interface User {
+  id: string;
+  email: string;
+  name?: string;
+  username?: string;
+  phone?: string;
+  avatar_url?: string;
+  bio?: string;
+  is_deleted?: boolean; // Novo: Para UI
+}
+
+export interface Message {
+  id: string;
+  sender_id: string | null; // Pode ser null se usuario deletado
+  content: string;
+  created_at: string;
+  is_read: boolean;
+  location?: {
+    lat: number;
+    lng: number;
+  };
+  context_score?: number;
+}
+
+export type EmotionalState = 'neutro' | 'feliz' | 'triste' | 'energizado' | 'cansado' | 'focado';
+export type ReactionType = 'heart' | 'fire';
+
+export interface Pulse {
+  id: string;
+  user_id: string;
+  user_name: string;
+  user_avatar: string;
+  content_type: 'text' | 'image';
+  content: string; 
+  description?: string;
+  emotional_state?: EmotionalState;
+  created_at: string;
+  expires_at: string;
+}
+
+export interface PulseReactionCounts {
+  heart: number;
+  fire: number;
+}
+
+export interface Topic {
+    id: string;
+    title: string;
+}
+
+export interface Metric {
+  label: string;
+  value: number;
+  delta?: number;
+}
+
+export interface EcoData {
+  pulseViews: { date: string; views: number }[];
+  totalMarks: number;
+  engagementScore: number;
+}
+
+export interface SearchResult {
+  id: string;
+  type: 'message' | 'pulse' | 'user';
+  title: string;
+  content: string;
+  date: string;
+  meta: any;
+}
+
+export interface ChatSummary {
+  chatId: string;
+  otherUser: {
+    id: string;
+    name: string;
+    username: string;
+    avatar_url: string;
+    is_deleted?: boolean; // Novo
+  };
+  lastMessage: Message;
+  unreadCount: number;
+}
+
+export enum AppScreen {
+  LOGIN = 'LOGIN',
+  HOME = 'HOME',
+  CHAT = 'CHAT',
+  ECO = 'ECO',
+  PROFILE = 'PROFILE',
+  USER_PROFILE = 'USER_PROFILE'
+}

@@ -1,0 +1,7 @@
+{
+  "name": "ELO",
+  "description": "Um aplicativo de mensagens focado em conexões reais, contexto e privacidade. Sem bots, sem feed infinito, apenas o que importa.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
