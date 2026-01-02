@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, MoreVertical, MapPin, Check, CheckCheck, Navigation, Ban, AlertTriangle, Paperclip, Image as ImageIcon, Mic, Sparkles } from 'lucide-react';
+import { ArrowLeft, Send, MoreVertical, MapPin, Check, CheckCheck, Navigation, Ban, AlertTriangle, Paperclip, Image as ImageIcon, Mic, Sparkles, Hourglass, Plus, X } from 'lucide-react';
 import { Message, User, MessageType } from '../types';
 import { fetchMessages, sendMessage, markMessagesAsRead, getUserProfile } from '../services/dataService';
 import { analyzeConversationEmotion, EmotionType } from '../services/aiService';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabaseClient';
 
 interface ChatScreenProps {
   chatId: string;
@@ -35,6 +36,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
   const [myEmotion, setMyEmotion] = useState<{ tone: EmotionType, intensity: number }>({ tone: 'Neutro', intensity: 0 });
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
+  // Activity Indicators (Typing...)
+  const [otherUserActivity, setOtherUserActivity] = useState<'typing' | 'image' | null>(null);
+  const typingTimeoutRef = useRef<any>(null);
+  const channelRef = useRef<any>(null);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -60,11 +66,35 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
             }
         }
     });
+
+    // 3. Supabase Realtime Broadcast for Typing Indicators
+    const channel = supabase.channel(`chat_activity_${chatId}`, {
+        config: {
+            broadcast: { self: false },
+        },
+    });
+
+    channel
+        .on('broadcast', { event: 'activity' }, ({ payload }) => {
+            if (payload.userId !== user.id) {
+                setOtherUserActivity(payload.type);
+                
+                // Clear activity after a few seconds if no new events come in
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => {
+                    setOtherUserActivity(null);
+                }, 3000);
+            }
+        })
+        .subscribe();
+    
+    channelRef.current = channel;
     
     if (initialMessage && inputRef.current) {
         setTimeout(() => inputRef.current?.focus(), 500);
     }
     
+    // Polling fallback for messages (could be replaced by DB subscription too)
     const interval = setInterval(() => {
         fetchMessages(chatId).then(data => {
             setMessages(data);
@@ -72,7 +102,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
         });
     }, 10000); 
 
-    return () => clearInterval(interval);
+    return () => {
+        clearInterval(interval);
+        if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+        supabase.removeChannel(channel);
+    };
   }, [chatId, user, targetUser.id]);
 
   useEffect(() => {
@@ -81,6 +115,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
           return () => clearTimeout(t);
       }
   }, [toastMessage]);
+
+  const broadcastActivity = (type: 'typing' | 'image') => {
+      if (channelRef.current && user) {
+          channelRef.current.send({
+              type: 'broadcast',
+              event: 'activity',
+              payload: { userId: user.id, type }
+          });
+      }
+  };
 
   const runEmotionAnalysis = async (msgs: Message[]) => {
       if (!user) return;
@@ -125,9 +169,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
     }
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      setInputText(e.target.value);
+      broadcastActivity('typing');
+  };
+
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
+          broadcastActivity('image');
           const reader = new FileReader();
           reader.onloadend = () => {
               handleSend('image', reader.result as string);
@@ -175,8 +225,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-zinc-950 relative">
+    <div className="flex flex-col h-[100dvh] bg-zinc-950 relative overflow-hidden">
       
+      {/* Background Cyberpunk Grid */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808005_1px,transparent_1px),linear-gradient(to_bottom,#80808005_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
+      <div className="absolute inset-0 bg-gradient-to-b from-zinc-950 via-transparent to-zinc-950 pointer-events-none"></div>
+
       {toastMessage && (
           <div className={`absolute top-20 left-1/2 -translate-x-1/2 z-[60] px-6 py-2 rounded-full shadow-lg font-bold text-xs animate-fade-in flex items-center gap-2 ${
               toastMessage.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-zinc-100 text-zinc-950'
@@ -187,7 +241,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
       )}
 
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-4 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 sticky top-0 z-20 shrink-0">
+      <header className="flex items-center justify-between px-4 py-4 bg-zinc-950/70 backdrop-blur-xl border-b border-white/5 sticky top-0 z-20 shrink-0">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="p-2 -ml-2 text-zinc-400 hover:text-zinc-100 active:scale-95 transition-transform">
             <ArrowLeft size={20} />
@@ -204,7 +258,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
                         className="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-800 object-cover" 
                         alt="Avatar" 
                     />
-                    {/* Partner Emotion Badge (Small dot/icon) */}
+                    {/* Partner Emotion Badge */}
                     {!isAnalyzing && partnerEmotion.tone !== 'Neutro' && (
                         <div className={`absolute -bottom-1 -right-1 bg-zinc-900 rounded-full p-1 border border-zinc-800 ${getEmotionColor(partnerEmotion.tone)} animate-bounce`}>
                             <Sparkles size={8} className="fill-current" />
@@ -235,7 +289,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
       </header>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar z-10">
         {isBlocked && (
             <div className="flex justify-center my-4 animate-fade-in">
                 <div className="bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-lg flex items-center gap-2">
@@ -260,12 +314,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
             const isMe = msg.sender_id === user?.id; 
             
             return (
-                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-fade-in`}>
                 <div 
-                    className={`max-w-[80%] rounded-2xl text-sm leading-relaxed relative group shadow-sm overflow-hidden ${
+                    className={`max-w-[80%] rounded-2xl text-sm leading-relaxed relative group shadow-lg overflow-hidden border ${
                     isMe 
-                        ? 'bg-zinc-100 text-zinc-950 rounded-br-none' 
-                        : 'bg-zinc-800 text-zinc-200 rounded-bl-none border border-zinc-700'
+                        ? 'bg-gradient-to-br from-brand-primary to-emerald-600 text-white border-transparent rounded-tr-sm' 
+                        : 'bg-zinc-800/80 backdrop-blur-md text-zinc-200 border-white/5 rounded-tl-sm'
                     } ${msg.type === 'image' ? 'p-1' : 'px-4 py-3'}`}
                 >
                     {/* Render Content Based on Type */}
@@ -275,15 +329,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
                         </div>
                     ) : msg.type === 'location' && msg.location ? (
                         <div className="flex flex-col gap-2 min-w-[180px]">
-                            <div className="flex items-center gap-2 font-bold opacity-90 border-b border-black/5 pb-2 mb-1">
-                                <Navigation size={14} className={isMe ? 'text-brand-primary' : 'text-zinc-400'} />
+                            <div className={`flex items-center gap-2 font-bold opacity-90 border-b pb-2 mb-1 ${isMe ? 'border-white/20' : 'border-black/20'}`}>
+                                <Navigation size={14} className="fill-current" />
                                 <span>Localização Atual</span>
                             </div>
                             
-                            <div className={`h-24 rounded-lg flex items-center justify-center relative overflow-hidden ${isMe ? 'bg-zinc-200' : 'bg-zinc-900/50'}`}>
-                                <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle,_var(--tw-gradient-stops))] from-zinc-500 to-transparent"></div>
-                                <div className="w-8 h-8 rounded-full bg-brand-primary/20 flex items-center justify-center animate-pulse z-10">
-                                    <div className="w-3 h-3 bg-brand-primary rounded-full shadow-[0_0_10px_rgba(16,185,129,0.5)]" />
+                            <div className={`h-24 rounded-lg flex items-center justify-center relative overflow-hidden ${isMe ? 'bg-black/10' : 'bg-black/30'}`}>
+                                <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle,_var(--tw-gradient-stops))] from-white to-transparent"></div>
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center animate-pulse z-10 ${isMe ? 'bg-white/30' : 'bg-brand-primary/20'}`}>
+                                    <div className={`w-3 h-3 rounded-full shadow-[0_0_10px_currentColor] ${isMe ? 'bg-white' : 'bg-brand-primary'}`} />
                                 </div>
                                 <div className="absolute inset-0 opacity-10" style={{backgroundImage: 'radial-gradient(circle, #000 1px, transparent 1px)', backgroundSize: '10px 10px'}}></div>
                             </div>
@@ -294,7 +348,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
                                 rel="noreferrer"
                                 className={`text-xs font-semibold py-2 text-center rounded-lg transition-colors flex items-center justify-center gap-2 ${
                                     isMe 
-                                    ? 'bg-white text-zinc-900 hover:bg-zinc-50 shadow-sm border border-zinc-200' 
+                                    ? 'bg-white/20 hover:bg-white/30 text-white' 
                                     : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-950 border border-zinc-700'
                                 }`}
                             >
@@ -306,12 +360,12 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
                         <span className="whitespace-pre-wrap">{msg.content}</span>
                     )}
 
-                    <div className={`flex items-center justify-end gap-1 mt-1 opacity-60 ${isMe ? 'text-zinc-700' : 'text-zinc-500'} ${msg.type === 'image' ? 'pr-2 pb-1 text-white drop-shadow-md' : ''}`}>
+                    <div className={`flex items-center justify-end gap-1 mt-1 opacity-70 ${isMe ? 'text-white' : 'text-zinc-500'} ${msg.type === 'image' ? 'pr-2 pb-1 text-white drop-shadow-md' : ''}`}>
                         <span className="text-[9px]">
                             {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                         </span>
                         {isMe && (
-                             msg.is_read ? <CheckCheck size={12} className={msg.type === 'image' ? 'text-white' : 'text-blue-600'} /> : <Check size={12} />
+                             msg.is_read ? <CheckCheck size={12} /> : <Check size={12} />
                         )}
                     </div>
                 </div>
@@ -319,12 +373,33 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
             );
             })
         )}
+        
+        {/* Activity Indicator Bubble */}
+        {otherUserActivity && (
+            <div className="flex justify-start animate-fade-in">
+                <div className="bg-zinc-800/50 backdrop-blur-sm border border-white/5 px-4 py-3 rounded-2xl rounded-tl-sm flex items-center gap-2">
+                    {otherUserActivity === 'image' ? (
+                        <>
+                            <ImageIcon size={14} className="text-zinc-400 animate-pulse" />
+                            <span className="text-xs text-zinc-400 italic">Enviando foto...</span>
+                        </>
+                    ) : (
+                        <div className="flex gap-1 h-3 items-center">
+                            <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                            <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                            <span className="w-1.5 h-1.5 bg-zinc-500 rounded-full animate-bounce"></span>
+                        </div>
+                    )}
+                </div>
+            </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area - Com indicador do MEU humor */}
+      {/* Input Area - Desativada se Bloqueado ou Usuário Deletado */}
       {!isBlocked && !targetUser.is_deleted && (
-          <div className="p-3 bg-zinc-950/90 backdrop-blur-md border-t border-zinc-900 pb-safe shrink-0 flex flex-col gap-2">
+          <div className="p-3 bg-zinc-950/80 backdrop-blur-xl border-t border-white/5 pb-safe shrink-0 flex flex-col gap-2 z-20">
              
              {/* My Emotion Indicator (Subtle) */}
              {myEmotion.tone !== 'Neutro' && (
@@ -337,24 +412,24 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
 
              {/* Attachments Menu */}
              {showAttachments && (
-                 <div className="absolute bottom-20 left-4 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3 flex gap-4 animate-fade-in z-30">
-                     <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-brand-primary transition-colors">
-                         <div className="w-12 h-12 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-                             <ImageIcon size={24} />
+                 <div className="absolute bottom-20 left-4 bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl p-4 flex gap-6 animate-fade-in z-30">
+                     <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 text-zinc-400 hover:text-brand-primary transition-colors group">
+                         <div className="w-12 h-12 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center group-hover:scale-105 transition-transform group-hover:border-brand-primary/50">
+                             <ImageIcon size={20} />
                          </div>
-                         <span className="text-[10px]">Galeria</span>
+                         <span className="text-[10px] font-medium">Galeria</span>
                      </button>
-                     <button onClick={handleShareLocation} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-brand-primary transition-colors">
-                         <div className="w-12 h-12 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-                             <MapPin size={24} />
+                     <button onClick={handleShareLocation} className="flex flex-col items-center gap-2 text-zinc-400 hover:text-brand-primary transition-colors group">
+                         <div className="w-12 h-12 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center group-hover:scale-105 transition-transform group-hover:border-brand-primary/50">
+                             <MapPin size={20} />
                          </div>
-                         <span className="text-[10px]">Local</span>
+                         <span className="text-[10px] font-medium">Local</span>
                      </button>
-                     <button onClick={() => { setToastMessage({type: 'success', text: 'Audio em breve!'}); setShowAttachments(false); }} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-brand-primary transition-colors opacity-50">
-                         <div className="w-12 h-12 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
-                             <Mic size={24} />
+                     <button onClick={() => { setToastMessage({type: 'success', text: 'Cápsulas temporais em breve.'}); setShowAttachments(false); }} className="flex flex-col items-center gap-2 text-zinc-400 hover:text-indigo-400 transition-colors group">
+                         <div className="w-12 h-12 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center group-hover:scale-105 transition-transform group-hover:border-indigo-500/50">
+                             <Hourglass size={20} />
                          </div>
-                         <span className="text-[10px]">Áudio</span>
+                         <span className="text-[10px] font-medium">Futuro</span>
                      </button>
                  </div>
              )}
@@ -364,19 +439,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
             <div className="flex items-end gap-2">
                 <button 
                     onClick={() => setShowAttachments(!showAttachments)}
-                    className={`w-10 h-10 mb-1 rounded-full flex items-center justify-center transition-all ${
-                        showAttachments ? 'bg-zinc-800 text-brand-primary' : 'text-zinc-500 hover:bg-zinc-900'
+                    className={`w-11 h-11 mb-0.5 rounded-full flex items-center justify-center transition-all ${
+                        showAttachments ? 'bg-zinc-800 text-brand-primary rotate-45' : 'text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300'
                     }`}
                 >
-                    <Paperclip size={20} className={showAttachments ? 'rotate-45' : ''} />
+                    <Plus size={22} />
                 </button>
 
-                <div className="flex-1 min-h-[44px] bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-2 focus-within:border-zinc-600 transition-colors flex items-center gap-2">
+                <div className="flex-1 min-h-[48px] bg-zinc-900/50 border border-white/5 rounded-[20px] px-4 py-3 focus-within:border-brand-primary/30 focus-within:bg-zinc-900 transition-all flex items-center gap-2 shadow-inner">
                     <input 
                         ref={inputRef}
                         type="text" 
                         value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
+                        onChange={handleInputChange}
                         onKeyDown={(e) => e.key === 'Enter' && handleSend('text')}
                         placeholder="Mensagem..."
                         className="flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-600 outline-none max-h-24"
@@ -385,11 +460,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
 
                 <button 
                     onClick={() => handleSend('text')}
-                    className={`w-10 h-10 mb-1 rounded-full flex items-center justify-center transition-all shadow-lg ${
-                        inputText.trim() ? 'bg-brand-primary text-zinc-950 scale-100' : 'bg-zinc-800 text-zinc-500 scale-90'
+                    className={`w-11 h-11 mb-0.5 rounded-full flex items-center justify-center transition-all shadow-lg ${
+                        inputText.trim() ? 'bg-brand-primary text-zinc-950 scale-100 rotate-0' : 'bg-zinc-800 text-zinc-500 scale-90'
                     }`}
                 >
-                    {inputText.trim() ? <Send size={18} /> : <Mic size={18} />}
+                    {inputText.trim() ? <Send size={20} className="ml-0.5" /> : <Mic size={20} />}
                 </button>
             </div>
           </div>

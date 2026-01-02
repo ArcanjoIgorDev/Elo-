@@ -17,8 +17,9 @@
                 950: '#09090b', // Deep black/graphite
               },
               brand: {
-                primary: '#10b981', // Subtle emerald green for "Context/Life"
-                secondary: '#6366f1', // Indigo for depth
+                primary: '#10b981', // Subtle emerald green
+                secondary: '#6366f1', // Indigo
+                accent: '#f472b6', // Pink for cyberpunk accents
                 dark: '#050505'
               }
             },
@@ -27,11 +28,12 @@
             },
             animation: {
               'fade-in': 'fadeIn 0.3s ease-in-out',
+              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
             },
             keyframes: {
               fadeIn: {
-                '0%': { opacity: '0' },
-                '100%': { opacity: '1' },
+                '0%': { opacity: '0', transform: 'scale(0.95)' },
+                '100%': { opacity: '1', transform: 'scale(1)' },
               }
             }
           }
@@ -44,22 +46,51 @@
         window.process = { env: { NODE_ENV: 'development' } };
       }
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
       body {
-        background-color: #09090b;
+        background-color: #050505;
         color: #e4e4e7;
         font-family: 'Inter', sans-serif;
         -webkit-tap-highlight-color: transparent;
-        overscroll-behavior-y: none; /* Prevents bounce effect on mobile */
+        overscroll-behavior-y: none;
       }
-      /* Hide scrollbar for clean UI */
+      
+      /* Scanline Effect */
+      body::after {
+        content: "";
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: repeating-linear-gradient(
+          0deg,
+          rgba(0, 0, 0, 0.05),
+          rgba(0, 0, 0, 0.05) 1px,
+          transparent 1px,
+          transparent 2px
+        );
+        pointer-events: none;
+        z-index: 9999;
+        opacity: 0.3;
+      }
+
+      /* Clean Scrollbars */
       .no-scrollbar::-webkit-scrollbar {
         display: none;
       }
       .no-scrollbar {
         -ms-overflow-style: none;
         scrollbar-width: none;
+      }
+      
+      /* Glass Utility */
+      .glass-panel {
+        background: rgba(24, 24, 27, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
       }
     </style>
   <script type="importmap">

@@ -23,6 +23,9 @@ const AppContent: React.FC = () => {
   // Profile State
   const [viewProfileId, setViewProfileId] = useState<string | null>(null);
 
+  // Vibe Trigger State (Middle Button)
+  const [vibeTrigger, setVibeTrigger] = useState(0);
+
   // --- NAVEGAÇÃO COM BOTÃO VOLTAR FÍSICO ---
   useEffect(() => {
     // Ao montar, define o estado inicial no histórico se não existir
@@ -83,15 +86,16 @@ const AppContent: React.FC = () => {
   };
 
   const handleNavClick = (screen: AppScreen) => {
-      // Se clicar na tab atual, reseta para a "raiz" daquela tab (ex: fecha modais ou scrolls)
-      // Se for diferente, navega
       if (screen === AppScreen.HOME) {
-           // Limpa histórico profundo se voltar para home via tab
            window.history.pushState({ screen: AppScreen.HOME }, '');
            setCurrentScreen(AppScreen.HOME);
       } else {
            navigateTo(screen);
       }
+  };
+
+  const handleTriggerVibe = () => {
+      setVibeTrigger(prev => prev + 1);
   };
 
   if (loading) {
@@ -142,12 +146,17 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <Layout activeScreen={currentScreen} onNavigate={handleNavClick}>
+    <Layout 
+        activeScreen={currentScreen} 
+        onNavigate={handleNavClick}
+        onTriggerVibe={handleTriggerVibe}
+    >
       {currentScreen === AppScreen.HOME && (
           <HomeScreen 
             onNavigate={handleNavClick} 
             onChatSelect={handleOpenChat} 
             onViewProfile={handleViewProfile}
+            vibeTrigger={vibeTrigger}
           />
       )}
       {currentScreen === AppScreen.ECO && <EcoScreen />}
