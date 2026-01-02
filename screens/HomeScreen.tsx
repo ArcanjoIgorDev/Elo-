@@ -1,8 +1,9 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { fetchPulses, createPulse, fetchUserChats, searchUsers, getChatId, sendFriendRequest, fetchNotifications, respondToFriendRequest, fetchDailyTopic, clearNotification, getFriendsCount } from '../services/dataService';
 import { Pulse, AppScreen, ChatSummary, User, EmotionalState, Notification } from '../types';
 import PulseCard from '../components/PulseCard';
-import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Smile, Frown, Meh, Battery, BatteryCharging, Hash, Hexagon, User as UserIcon, Check, Bell, Flame, PenTool, ArrowRight, UserCheck, UserX, Sparkles, Users, Filter, Ghost, MapPin } from 'lucide-react';
+import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Smile, Frown, Meh, Battery, BatteryCharging, Hash, Hexagon, User as UserIcon, Check, Bell, Flame, PenTool, ArrowRight, UserCheck, UserX, Sparkles, Users, Filter, Ghost, MapPin, Copy, Share, QrCode } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface HomeScreenProps {
@@ -34,6 +35,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
 
   // Friends & Notifications
   const [isAddingFriend, setIsAddingFriend] = useState(false);
+  const [showQr, setShowQr] = useState(false); // Novo estado para QR Code
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [userSearchQuery, setUserSearchQuery] = useState('');
@@ -183,6 +185,32 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       setNotifications(prev => prev.filter(item => item.id !== n.id));
   };
 
+  const handleCopyUsername = () => {
+      if (user?.username) {
+          navigator.clipboard.writeText(user.username);
+          showToast("ID copiado!");
+      }
+  };
+
+  const handleNativeShare = async () => {
+      if (!user) return;
+      const shareData = {
+          title: 'Conecte-se comigo no ELO',
+          text: `Vamos nos conectar no ELO! Meu ID é @${user.username}`,
+          url: window.location.href // Em um app real, seria um deeplink
+      };
+      
+      try {
+          if (navigator.share) {
+              await navigator.share(shareData);
+          } else {
+              handleCopyUsername();
+          }
+      } catch (err) {
+          console.log('Error sharing', err);
+      }
+  };
+
   const openExistingChat = (summary: ChatSummary) => {
       if (onChatSelect) {
           const u: User = {
@@ -208,7 +236,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   // Logic for Zen Mode Filtering
   const activeChats = chats.filter(c => !c.isNewConnection).filter(c => {
       if (!isZenMode) return true;
-      // Zen Mode: Mostra apenas se tem mensagem não lida OU se a mensagem é recente (< 24h)
       if (c.unreadCount > 0) return true;
       if (c.lastMessage) {
           const msgDate = new Date(c.lastMessage.created_at);
@@ -253,6 +280,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                 <Filter size={18} />
              </button>
 
+             {/* Add Friend Button (New) */}
+             <button 
+                onClick={() => setIsAddingFriend(true)}
+                className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-brand-primary hover:border-brand-primary/50 transition-all"
+             >
+                 <UserPlus size={18} />
+             </button>
+
              <button 
                 onClick={() => setIsNotificationsOpen(true)}
                 className={`w-10 h-10 rounded-full bg-zinc-900 border flex items-center justify-center transition-colors relative ${notifications.length > 0 ? 'border-brand-primary/30 text-brand-primary bg-brand-primary/5' : 'border-zinc-800 text-zinc-400 hover:text-white'}`}
@@ -276,7 +311,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
           </div>
       </header>
 
-      {/* --- NOTIFICATIONS HUD (HOLOGRAPHIC STYLE) --- */}
+      {/* --- NOTIFICATIONS HUD --- */}
       {isNotificationsOpen && (
           <div className="fixed inset-0 z-[60] bg-black/80 backdrop-blur-md flex flex-col p-6 animate-fade-in">
              <div className="flex justify-between items-center mb-8 border-b border-white/10 pb-4">
@@ -328,6 +363,145 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                              )}
                          </div>
                      ))
+                 )}
+             </div>
+          </div>
+      )}
+
+      {/* --- BUSCA DE USUÁRIOS MODAL (PROFESSIONAL DIRECTORY) --- */}
+      {isAddingFriend && (
+          <div className="fixed inset-0 z-[60] bg-zinc-950/95 backdrop-blur-xl flex flex-col p-6 animate-fade-in">
+             <div className="flex justify-between items-center mb-6">
+                 <div>
+                    <h2 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+                        Diretório
+                    </h2>
+                    <p className="text-xs text-zinc-500 font-medium">Expanda sua rede no ELO</p>
+                 </div>
+                 <button onClick={() => { setIsAddingFriend(false); setUserSearchQuery(''); setUserSearchResults([]) }} className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white border border-zinc-800">
+                     <X size={20} />
+                 </button>
+             </div>
+
+             {/* Professional Business Card */}
+             <div className="perspective-1000 mb-8">
+                 <div className={`relative transition-all duration-500 transform-style-3d ${showQr ? 'rotate-y-180' : ''}`}>
+                    
+                    {/* Front: Info */}
+                    {!showQr && (
+                        <div className="bg-gradient-to-br from-zinc-900 to-zinc-800 rounded-2xl p-5 border border-zinc-700/50 shadow-2xl relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-brand-primary/5 rounded-full blur-[40px] pointer-events-none"></div>
+                            <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-brand-primary to-brand-secondary"></div>
+                            
+                            <div className="flex items-center gap-4 relative z-10 mb-4">
+                                <img src={user?.avatar_url} className="w-16 h-16 rounded-xl bg-zinc-950 shadow-inner border border-white/5" />
+                                <div className="flex-1">
+                                    <h3 className="text-white font-bold text-lg">{user?.name}</h3>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <code className="text-brand-primary font-mono text-xs bg-brand-primary/10 px-2 py-0.5 rounded border border-brand-primary/20">@{user?.username}</code>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                                <button onClick={handleNativeShare} className="flex-1 bg-zinc-950/50 hover:bg-zinc-950 border border-zinc-700 hover:border-zinc-500 text-zinc-300 rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-2 transition-all">
+                                    <Share size={14} /> Compartilhar
+                                </button>
+                                <button onClick={() => setShowQr(true)} className="flex-1 bg-zinc-950/50 hover:bg-zinc-950 border border-zinc-700 hover:border-zinc-500 text-zinc-300 rounded-xl py-2.5 text-xs font-bold flex items-center justify-center gap-2 transition-all">
+                                    <QrCode size={14} /> QR Code
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Back: QR Code */}
+                    {showQr && (
+                        <div className="bg-white rounded-2xl p-6 shadow-2xl relative flex flex-col items-center justify-center animate-fade-in">
+                            <h3 className="text-zinc-900 font-bold text-sm mb-4 flex items-center gap-2"><Hexagon size={16} className="fill-zinc-900"/> ELO ID</h3>
+                            <div className="w-40 h-40 bg-zinc-100 rounded-lg mb-4 flex items-center justify-center border-2 border-zinc-900 relative overflow-hidden">
+                                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-black to-transparent"></div>
+                                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=elo_app_user:${user?.username}&color=000000`} alt="QR" className="w-36 h-36 mix-blend-multiply" />
+                            </div>
+                            <button onClick={() => setShowQr(false)} className="text-zinc-500 text-xs font-medium hover:text-zinc-900 flex items-center gap-1">
+                                <ArrowRight size={12} className="rotate-180"/> Voltar
+                            </button>
+                        </div>
+                    )}
+
+                 </div>
+             </div>
+             
+             {/* Search Bar */}
+             <div className="relative mb-6">
+                 <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
+                 <input 
+                    autoFocus
+                    type="text"
+                    value={userSearchQuery}
+                    onChange={(e) => handleUserSearch(e.target.value)}
+                    placeholder="Buscar pelo nome ou @username"
+                    className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 pl-11 pr-4 py-4 rounded-xl outline-none focus:border-brand-primary/50 transition-colors shadow-inner text-sm font-medium placeholder-zinc-600"
+                 />
+             </div>
+
+             {/* Results */}
+             <div className="flex-1 overflow-y-auto space-y-3">
+                 {isSearchingUsers ? (
+                     <div className="flex flex-col items-center justify-center mt-12 gap-2">
+                        <Loader2 className="animate-spin text-brand-primary" />
+                        <span className="text-xs text-zinc-500">Buscando na rede...</span>
+                     </div>
+                 ) : userSearchResults.length > 0 ? (
+                     userSearchResults.map(result => (
+                         <div 
+                             key={result.user.id} 
+                             // Alteração Aqui: Clicar no card inteiro abre o Perfil
+                             onClick={() => {
+                                 if (onViewProfile) {
+                                     onViewProfile(result.user.id);
+                                     setIsAddingFriend(false);
+                                 }
+                             }}
+                             className="bg-zinc-900/40 border border-zinc-800 p-3 rounded-2xl flex items-center gap-4 hover:bg-zinc-900 transition-colors group cursor-pointer"
+                         >
+                             <img src={result.user.avatar_url} className="w-12 h-12 rounded-full bg-zinc-800 object-cover border border-zinc-800 group-hover:border-zinc-600 transition-colors" />
+                             <div className="flex-1 min-w-0">
+                                 <h3 className="text-zinc-100 font-semibold truncate text-sm">{result.user.name}</h3>
+                                 <p className="text-zinc-500 text-xs truncate font-mono">@{result.user.username}</p>
+                                 {(result.user.city || result.user.education) && (
+                                     <div className="flex items-center gap-2 mt-1">
+                                         {result.user.city && <span className="text-[9px] text-zinc-600 flex items-center gap-0.5"><MapPin size={8}/> {result.user.city}</span>}
+                                         {result.user.education && <span className="text-[9px] text-zinc-600 border-l border-zinc-800 pl-2">{result.user.education}</span>}
+                                     </div>
+                                 )}
+                             </div>
+                             
+                             <div onClick={(e) => e.stopPropagation()}>
+                                 {result.friendshipStatus === 'accepted' ? (
+                                     <button onClick={() => { if(onChatSelect) onChatSelect(getChatId(user!.id, result.user.id), result.user); setIsAddingFriend(false); }} className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-xs font-bold border border-zinc-700 hover:bg-zinc-700">Chat</button>
+                                 ) : result.friendshipStatus === 'pending' ? (
+                                     <div className="flex items-center gap-1 bg-zinc-950 px-3 py-2 rounded-lg border border-zinc-800">
+                                         <UserCheck size={14} className="text-brand-primary" />
+                                         <span className="text-[10px] text-zinc-400 font-medium uppercase tracking-wider">Pendente</span>
+                                     </div>
+                                 ) : (
+                                     <button onClick={() => handleSendRequest(result.user.id)} className="px-4 py-2 bg-white text-zinc-950 rounded-lg text-xs font-bold hover:scale-105 transition-transform shadow-lg shadow-white/10 flex items-center gap-2">
+                                         Conectar <UserPlus size={14}/>
+                                     </button>
+                                 )}
+                             </div>
+                         </div>
+                     ))
+                 ) : userSearchQuery.length >= 3 ? (
+                     <div className="flex flex-col items-center justify-center mt-20 opacity-40">
+                         <UserX size={40} className="mb-2 text-zinc-500" />
+                         <p className="text-center text-zinc-500 text-xs">Nenhum usuário encontrado.</p>
+                     </div>
+                 ) : (
+                     <div className="flex flex-col items-center justify-center mt-20 opacity-30">
+                         <Users size={40} className="mb-2 text-zinc-600" />
+                         <p className="text-center text-zinc-600 text-xs">Digite para pesquisar no diretório.</p>
+                     </div>
                  )}
              </div>
           </div>
@@ -395,66 +569,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                          <Send size={18} />
                      </button>
                  </div>
-             </div>
-          </div>
-      )}
-
-      {/* ... (rest of the file remains similar but truncated for brevity) */}
-      {/* ... (Search User Modal, Feed, etc.) */}
-      
-      {/* --- BUSCA DE USUÁRIOS MODAL --- */}
-      {isAddingFriend && (
-          <div className="fixed inset-0 z-[60] bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
-             <div className="flex justify-between items-center mb-6">
-                 <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
-                     <UserPlus size={20} className="text-brand-secondary" /> Nova Conexão
-                 </h2>
-                 <button onClick={() => { setIsAddingFriend(false); setUserSearchQuery(''); setUserSearchResults([]) }} className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white">
-                     <X size={20} />
-                 </button>
-             </div>
-             
-             <div className="relative mb-6">
-                 <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" />
-                 <input 
-                    autoFocus
-                    type="text"
-                    value={userSearchQuery}
-                    onChange={(e) => handleUserSearch(e.target.value)}
-                    placeholder="Buscar @username..."
-                    className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 pl-11 pr-4 py-4 rounded-2xl outline-none focus:border-brand-primary/50 transition-colors shadow-inner"
-                 />
-             </div>
-
-             <div className="flex-1 overflow-y-auto space-y-3">
-                 {isSearchingUsers ? (
-                     <div className="flex justify-center mt-10"><Loader2 className="animate-spin text-zinc-600" /></div>
-                 ) : userSearchResults.length > 0 ? (
-                     userSearchResults.map(result => (
-                         <div key={result.user.id} className="bg-zinc-900/40 border border-zinc-800 p-4 rounded-2xl flex items-center gap-4 hover:bg-zinc-900 transition-colors">
-                             <img src={result.user.avatar_url} className="w-12 h-12 rounded-full bg-zinc-800 object-cover" />
-                             <div className="flex-1 min-w-0">
-                                 <h3 className="text-zinc-100 font-semibold truncate">{result.user.name}</h3>
-                                 <p className="text-zinc-500 text-xs truncate">@{result.user.username}</p>
-                             </div>
-                             {result.friendshipStatus === 'accepted' ? (
-                                 <button onClick={() => { if(onChatSelect) onChatSelect(getChatId(user!.id, result.user.id), result.user); setIsAddingFriend(false); }} className="p-3 bg-brand-primary text-zinc-950 rounded-full hover:scale-105 transition-transform"><MessageCircle size={20} /></button>
-                             ) : result.friendshipStatus === 'pending' ? (
-                                 <div className="flex items-center gap-1 bg-zinc-800 px-3 py-1.5 rounded-lg border border-zinc-700">
-                                     <UserCheck size={14} className="text-zinc-400" />
-                                     <span className="text-[10px] text-zinc-400 font-medium">Enviado</span>
-                                 </div>
-                             ) : (
-                                 <button onClick={() => handleSendRequest(result.user.id)} className="p-3 bg-zinc-100 text-zinc-950 rounded-full hover:scale-105 transition-transform shadow-lg shadow-white/5"><UserPlus size={20} /></button>
-                             )}
-                         </div>
-                     ))
-                 ) : (
-                     <div className="flex flex-col items-center justify-center mt-20 opacity-30">
-                         <UserIcon size={40} className="mb-2" />
-                         <p className="text-center text-zinc-500 text-xs">Busque amigos pelo username</p>
-                     </div>
-                 )}
              </div>
           </div>
       )}

@@ -1,6 +1,7 @@
+
 import React from 'react';
 import { AppScreen } from '../types';
-import { MessageSquare, User, Zap } from 'lucide-react';
+import { MessageSquare, User, Zap, Map } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -18,7 +19,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeScreen, onNavigate, onT
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="h-20 bg-zinc-950/80 backdrop-blur-xl border-t border-white/5 pb-safe pt-2 px-8 flex justify-between items-center z-50 shrink-0 absolute bottom-0 w-full shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+      <nav className="h-20 bg-zinc-950/80 backdrop-blur-xl border-t border-white/5 pb-safe pt-2 px-6 flex justify-between items-center z-50 shrink-0 absolute bottom-0 w-full shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
         
         {/* Chat Tab */}
         <NavButton 
@@ -28,8 +29,16 @@ const Layout: React.FC<LayoutProps> = ({ children, activeScreen, onNavigate, onT
           label="Chat"
         />
 
+        {/* Map Tab (NOVO) */}
+        <NavButton 
+          isActive={activeScreen === AppScreen.MAP} 
+          onClick={() => onNavigate(AppScreen.MAP)}
+          icon={<Map size={22} />}
+          label="Grid"
+        />
+
         {/* Center Action Button (VIBE) */}
-        <div className="relative -top-5">
+        <div className="relative -top-6 mx-2">
             <button 
                 onClick={() => {
                     onNavigate(AppScreen.HOME);
@@ -42,6 +51,14 @@ const Layout: React.FC<LayoutProps> = ({ children, activeScreen, onNavigate, onT
                 <div className="absolute inset-0 rounded-2xl bg-brand-primary blur-xl opacity-40 -z-10"></div>
             </button>
         </div>
+
+        {/* Eco/Stats Tab (Mantido, mas agora 4 itens no total) */}
+         <NavButton 
+          isActive={activeScreen === AppScreen.ECO} 
+          onClick={() => onNavigate(AppScreen.ECO)}
+          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M2 12h20M12 12l4-4m-4 4l-4 4"/></svg>} // Using custom generic icon or TrendingUp
+          label="Eco"
+        />
 
         {/* Profile Tab */}
         <NavButton 
@@ -64,7 +81,7 @@ const NavButton: React.FC<{
   return (
     <button 
       onClick={onClick}
-      className={`flex flex-col items-center justify-center w-16 h-full transition-all duration-300 active:scale-95 gap-1 ${
+      className={`flex flex-col items-center justify-center w-14 h-full transition-all duration-300 active:scale-95 gap-1 ${
         isActive ? 'text-zinc-100' : 'text-zinc-600 hover:text-zinc-400'
       }`}
     >

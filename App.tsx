@@ -7,7 +7,8 @@ import HomeScreen from './screens/HomeScreen';
 import ChatScreen from './screens/ChatScreen';
 import EcoScreen from './screens/EcoScreen';
 import ProfileScreen from './screens/ProfileScreen';
-import SettingsScreen from './screens/SettingsScreen'; // Novo
+import SettingsScreen from './screens/SettingsScreen';
+import MapScreen from './screens/MapScreen'; // Novo
 import { AppScreen, User } from './types';
 import { getChatId } from './services/dataService';
 
@@ -130,8 +131,6 @@ const AppContent: React.FC = () => {
           <SettingsScreen 
             onBack={() => window.history.back()}
             onNavigateProfile={() => {
-                // Navigate to own profile but inside layout context? Or keep as full?
-                // Let's use standard nav
                 navigateTo(AppScreen.PROFILE);
             }}
             onLogout={signOut}
@@ -162,6 +161,7 @@ const AppContent: React.FC = () => {
       )
   }
 
+  // Layout-wrapped screens
   return (
     <Layout 
         activeScreen={currentScreen} 
@@ -174,6 +174,12 @@ const AppContent: React.FC = () => {
             onChatSelect={handleOpenChat} 
             onViewProfile={handleViewProfile}
             vibeTrigger={vibeTrigger}
+          />
+      )}
+      {currentScreen === AppScreen.MAP && (
+          <MapScreen 
+             onBack={() => handleNavClick(AppScreen.HOME)}
+             onViewProfile={handleViewProfile}
           />
       )}
       {currentScreen === AppScreen.ECO && <EcoScreen />}

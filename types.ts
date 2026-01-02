@@ -7,16 +7,20 @@ export interface User {
   phone?: string;
   avatar_url?: string;
   bio?: string;
-  is_deleted?: boolean; // Novo: Para UI
+  city?: string; // Novo
+  education?: string; // Novo
+  latitude?: number; // Novo
+  longitude?: number; // Novo
+  is_deleted?: boolean;
 }
 
 export type MessageType = 'text' | 'image' | 'audio' | 'location';
 
 export interface Message {
   id: string;
-  sender_id: string | null; // Pode ser null se usuario deletado
-  content: string; // Se for imagem, aqui vai o base64
-  type?: MessageType; // Novo campo
+  sender_id: string | null;
+  content: string;
+  type?: MessageType;
   created_at: string;
   is_read: boolean;
   location?: {
@@ -90,9 +94,9 @@ export interface ChatSummary {
     avatar_url: string;
     is_deleted?: boolean; // Novo
   };
-  lastMessage?: Message; // Opcional: Amigos novos podem não ter mensagens ainda
+  lastMessage?: Message;
   unreadCount: number;
-  isNewConnection?: boolean; // Helper para UI
+  isNewConnection?: boolean;
 }
 
 export interface Notification {
@@ -107,6 +111,7 @@ export enum AppScreen {
   LOGIN = 'LOGIN',
   HOME = 'HOME',
   CHAT = 'CHAT',
+  MAP = 'MAP', // Nova Tela
   ECO = 'ECO',
   PROFILE = 'PROFILE',
   USER_PROFILE = 'USER_PROFILE',

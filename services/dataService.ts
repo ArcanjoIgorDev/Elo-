@@ -8,6 +8,20 @@ export const getChatId = (userA: string, userB: string) => {
     return `${ids[0]}_${ids[1]}`;
 };
 
+// --- HELPER: Distância Haversine (Km) ---
+export const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371; // Raio da Terra em km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * 
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; 
+  return Math.round(d * 10) / 10; // Retorna com 1 casa decimal
+};
+
 // --- SERVICES ---
 
 // Calcula a Ressonância Real (Atividade nos últimos 7 dias)
@@ -65,7 +79,6 @@ export const fetchUserResonance = async (userId: string): Promise<ActivityPoint[
         const result: ActivityPoint[] = Array.from(activityMap.entries())
             .map(([date, counts]) => {
                 const dateObj = new Date(date);
-                // Adiciona fuso horário para exibir corretamente o dia da semana
                 const userTimezoneOffset = dateObj.getTimezoneOffset() * 60000;
                 const localDate = new Date(dateObj.getTime() + userTimezoneOffset);
                 
@@ -74,7 +87,7 @@ export const fetchUserResonance = async (userId: string): Promise<ActivityPoint[
                     fullDate: localDate.toLocaleDateString('pt-BR', { weekday: 'short' }).toUpperCase(),
                     messages: counts.messages,
                     pulses: counts.pulses,
-                    total: counts.messages + (counts.pulses * 5) // Peso maior para Vibes
+                    total: counts.messages + (counts.pulses * 5)
                 };
             })
             .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -151,14 +164,12 @@ export const removeFriend = async (friendshipId: string): Promise<boolean> => {
 
 export const getFriendsCount = async (userId: string): Promise<number> => {
     try {
-        // Query A: Eu sou user_id
         const { count: countA, error: errorA } = await supabase
             .from('friendships')
             .select('*', { count: 'exact', head: true })
             .eq('user_id', userId)
             .eq('status', 'accepted');
 
-        // Query B: Eu sou friend_id
         const { count: countB, error: errorB } = await supabase
             .from('friendships')
             .select('*', { count: 'exact', head: true })
@@ -172,12 +183,21 @@ export const getFriendsCount = async (userId: string): Promise<number> => {
     }
 }
 
-// --- UPDATE PROFILE ---
-export const updateUserProfileMeta = async (userId: string, updates: { bio?: string, avatar_url?: string }): Promise<boolean> => {
+// --- UPDATE PROFILE (Com novos campos) ---
+export const updateUserProfileMeta = async (userId: string, updates: Partial<User>): Promise<boolean> => {
     try {
+        const payload: any = {};
+        if (updates.bio !== undefined) payload.bio = updates.bio;
+        if (updates.avatar_url !== undefined) payload.avatar_url = updates.avatar_url;
+        if (updates.city !== undefined) payload.city = updates.city;
+        if (updates.education !== undefined) payload.education = updates.education;
+        if (updates.latitude !== undefined) payload.latitude = updates.latitude;
+        if (updates.longitude !== undefined) payload.longitude = updates.longitude;
+        if (updates.latitude || updates.longitude) payload.location_updated_at = new Date().toISOString();
+
         const { error } = await supabase
             .from('users_meta')
-            .update(updates)
+            .update(payload)
             .eq('user_id', userId);
         
         if (error) throw error;
@@ -191,7 +211,6 @@ export const updateUserProfileMeta = async (userId: string, updates: { bio?: str
 // --- FETCH PULSES (Com filtro de usuários deletados) ---
 export const fetchPulses = async (): Promise<Pulse[]> => {
   try {
-    // Busca pulsos
     const { data: pulses, error } = await supabase
       .from('pulsos')
       .select('*')
@@ -200,17 +219,13 @@ export const fetchPulses = async (): Promise<Pulse[]> => {
     if (error) throw error;
     if (!pulses || pulses.length === 0) return [];
 
-    // Busca IDs de usuários que ainda existem na users_meta
     const userIds = [...new Set(pulses.map(p => p.user_id))];
     const { data: existingUsers } = await supabase
         .from('users_meta')
         .select('user_id')
         .in('user_id', userIds);
     
-    // Cria um Set para busca rápida O(1)
     const validUserIds = new Set(existingUsers?.map(u => u.user_id));
-
-    // Filtra apenas posts de usuários que ainda existem
     const validPulses = pulses.filter(p => validUserIds.has(p.user_id));
 
     return validPulses as Pulse[];
@@ -298,7 +313,6 @@ export const getPulseReactions = async (pulseId: string, currentUserId: string):
 
 export const togglePulseReaction = async (pulseId: string, userId: string, type: ReactionType): Promise<boolean> => {
     try {
-        // Verifica se já existe
         const { data: existing } = await supabase
             .from('pulse_reactions')
             .select('*')
@@ -308,14 +322,11 @@ export const togglePulseReaction = async (pulseId: string, userId: string, type:
 
         if (existing) {
             if (existing.reaction_type === type) {
-                // Remove (toggle off)
                 await supabase.from('pulse_reactions').delete().eq('id', existing.id);
             } else {
-                // Atualiza para o novo tipo
                 await supabase.from('pulse_reactions').update({ reaction_type: type }).eq('id', existing.id);
             }
         } else {
-            // Cria nova
             await supabase.from('pulse_reactions').insert({
                 pulse_id: pulseId,
                 user_id: userId,
@@ -329,10 +340,48 @@ export const togglePulseReaction = async (pulseId: string, userId: string, type:
     }
 };
 
-// --- CHAT & FRIENDS FETCHING (REWRITTEN FOR "NEW CONNECTIONS") ---
+// --- FRIENDS & LOCATIONS ---
+// NOVA FUNÇÃO: Busca apenas amigos que têm localização salva, com dados REAIS do banco.
+export const fetchFriendsLocations = async (currentUserId: string): Promise<User[]> => {
+    try {
+        // 1. Pegar IDs dos amigos
+        const { data: friendshipsA } = await supabase.from('friendships').select('friend_id').eq('user_id', currentUserId).eq('status', 'accepted');
+        const { data: friendshipsB } = await supabase.from('friendships').select('user_id').eq('friend_id', currentUserId).eq('status', 'accepted');
+
+        const friendIds = new Set<string>();
+        friendshipsA?.forEach((f: any) => friendIds.add(f.friend_id));
+        friendshipsB?.forEach((f: any) => friendIds.add(f.user_id));
+
+        if (friendIds.size === 0) return [];
+
+        // 2. Pegar dados dos amigos, INCLUINDO latitude/longitude
+        const { data: users } = await supabase
+            .from('users_meta')
+            .select('*')
+            .in('user_id', Array.from(friendIds))
+            .not('latitude', 'is', null) // Só traz quem tem localização
+            .not('longitude', 'is', null); 
+
+        return (users || []).map((u: any) => ({
+            id: u.user_id,
+            email: '', // Não precisa expor
+            name: u.name,
+            username: u.username,
+            avatar_url: u.avatar_url,
+            city: u.city,
+            latitude: u.latitude,
+            longitude: u.longitude
+        }));
+
+    } catch (e: any) {
+        console.error("Erro ao buscar localizações:", e.message);
+        return [];
+    }
+};
+
+// --- CHAT & FRIENDS FETCHING ---
 export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary[]> => {
     try {
-        // 1. Busca TODAS as amizades aceitas primeiro
         const { data: friendshipsA } = await supabase
             .from('friendships')
             .select('friend_id, created_at')
@@ -345,22 +394,12 @@ export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary
             .eq('friend_id', currentUserId)
             .eq('status', 'accepted');
 
-        // Consolida IDs de amigos
         const friendIds: string[] = [];
-        const friendshipDates = new Map<string, string>(); // friendId -> date
-
-        friendshipsA?.forEach((f: any) => {
-             friendIds.push(f.friend_id);
-             friendshipDates.set(f.friend_id, f.created_at);
-        });
-        friendshipsB?.forEach((f: any) => {
-             friendIds.push(f.user_id);
-             friendshipDates.set(f.user_id, f.created_at);
-        });
+        friendshipsA?.forEach((f: any) => friendIds.push(f.friend_id));
+        friendshipsB?.forEach((f: any) => friendIds.push(f.user_id));
 
         if (friendIds.length === 0) return [];
 
-        // 2. Busca Detalhes dos Usuários (Amigos)
         const { data: usersData } = await supabase
             .from('users_meta')
             .select('user_id, name, username, avatar_url')
@@ -369,25 +408,21 @@ export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary
         const friendsMap = new Map<string, any>();
         usersData?.forEach((u: any) => friendsMap.set(u.user_id, u));
 
-        // 3. Busca MENSAGENS recentes para determinar conversas ativas
         const { data: rawMessages } = await supabase
             .from('messages')
             .select('*')
             .ilike('chat_id', `%${currentUserId}%`)
-            .order('created_at', { ascending: false }); // As mais recentes primeiro
+            .order('created_at', { ascending: false });
 
-        // Injeta tipo baseado no conteúdo, já que a coluna 'type' não existe no DB
         const messages = (rawMessages || []).map((m: any) => ({
             ...m,
             type: m.location ? 'location' : (m.content && m.content.startsWith('data:image') ? 'image' : 'text')
         }));
 
-        // 4. Processa e Agrupa
         const chats: ChatSummary[] = [];
         const processedFriendIds = new Set<string>();
         const chatsWithUnread: { [chatId: string]: number } = {};
 
-        // Helper para contar mensagens não lidas por chat
         if (messages) {
             messages.forEach((m: any) => {
                  if (!m.is_read && m.sender_id !== currentUserId) {
@@ -420,7 +455,6 @@ export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary
             }
         }
 
-        // B. Novas Conexões (Amigos que ainda NÃO têm mensagens)
         for (const friendId of friendIds) {
             if (!processedFriendIds.has(friendId)) {
                 const friend = friendsMap.get(friendId);
@@ -434,7 +468,6 @@ export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary
                             avatar_url: friend.avatar_url,
                             is_deleted: false
                         },
-                        // lastMessage é undefined
                         unreadCount: 0,
                         isNewConnection: true
                     });
@@ -454,6 +487,7 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
     if (!query || query.length < 3) return [];
     
     try {
+        // Busca agora inclui cidade e educação
         const { data: users, error } = await supabase
             .from('users_meta')
             .select('*')
@@ -466,14 +500,14 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
         const results = await Promise.all(users.map(async (u: any) => {
             const { data: friendshipA } = await supabase
                 .from('friendships')
-                .select('status, blocked_by, user_id, friend_id')
+                .select('status, blocked_by')
                 .eq('user_id', currentUserId)
                 .eq('friend_id', u.user_id)
                 .single();
 
             const { data: friendshipB } = await supabase
                 .from('friendships')
-                .select('status, blocked_by, user_id, friend_id')
+                .select('status, blocked_by')
                 .eq('user_id', u.user_id)
                 .eq('friend_id', currentUserId)
                 .single();
@@ -483,7 +517,7 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
             let status = null;
             if (friendship) {
                 if (friendship.status === 'blocked' && friendship.blocked_by === u.user_id) {
-                    return null; // Não mostrar se fui bloqueado
+                    return null;
                 }
                 status = friendship.status;
                 if (status === 'rejected') status = null; 
@@ -497,6 +531,8 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
                     username: u.username,
                     avatar_url: u.avatar_url,
                     bio: u.bio,
+                    city: u.city,
+                    education: u.education,
                     phone: ''
                 },
                 friendshipStatus: status
@@ -557,29 +593,21 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
 
 export const fetchNotifications = async (currentUserId: string): Promise<Notification[]> => {
     try {
-        const { data: incoming, error: errorIncoming } = await supabase
+        const { data: incoming } = await supabase
             .from('friendships')
             .select('id, user_id, friend_id, status, created_at')
             .eq('friend_id', currentUserId)
             .eq('status', 'pending');
 
-        if (errorIncoming) throw errorIncoming;
-
-        const { data: updates, error: errorUpdates } = await supabase
+        const { data: updates } = await supabase
             .from('friendships')
             .select('id, user_id, friend_id, status, created_at')
             .eq('user_id', currentUserId)
             .in('status', ['accepted', 'rejected']);
 
-        if (errorUpdates) throw errorUpdates;
-
         const requests = [...(incoming || []), ...(updates || [])];
 
-        requests.sort((a, b) => {
-            const dateA = new Date(a.created_at).getTime();
-            const dateB = new Date(b.created_at).getTime();
-            return dateB - dateA;
-        });
+        requests.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
         const notifications: Notification[] = [];
 
@@ -620,7 +648,6 @@ export const fetchNotifications = async (currentUserId: string): Promise<Notific
 
         return notifications;
     } catch (e: any) {
-        console.error("Erro ao buscar notificações", JSON.stringify(e));
         return [];
     }
 };
@@ -701,7 +728,11 @@ export const getUserProfile = async (userId: string, currentUserId: string): Pro
                 name: userData.name,
                 username: userData.username,
                 avatar_url: userData.avatar_url,
-                bio: userData.bio
+                bio: userData.bio,
+                city: userData.city,
+                education: userData.education,
+                latitude: userData.latitude,
+                longitude: userData.longitude
             },
             friendship: friendship
         };
@@ -721,14 +752,12 @@ export const fetchMessages = async (chatId: string): Promise<Message[]> => {
 
     if (error) throw error;
     
-    // Mapeamento manual de tipo, pois a coluna não existe no banco
     return (data || []).map((m: any) => ({
         ...m,
         type: m.location ? 'location' : (m.content && m.content.startsWith('data:image') ? 'image' : 'text')
     })) as Message[];
 
   } catch (e: any) {
-    console.error('Erro ao buscar mensagens:', e.message);
     return [];
   }
 };
@@ -761,7 +790,6 @@ export const sendMessage = async (
             created_at: new Date().toISOString(),
             is_read: false,
             location: location || null,
-            // type: type // REMOVIDO: A coluna type não existe no banco. Inferimos no fetch.
         };
 
         const { data, error } = await supabase
@@ -772,7 +800,6 @@ export const sendMessage = async (
 
         if (error) throw error;
 
-        // Retorna o objeto completo para a UI usar (incluindo o tipo que o front já sabe)
         return {
             ...data,
             type: type

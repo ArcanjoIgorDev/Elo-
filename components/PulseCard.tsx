@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Pulse, ReactionType } from '../types';
 import { Trash2, Heart, Flame } from 'lucide-react';
@@ -12,13 +13,15 @@ interface PulseCardProps {
 
 const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, onClickProfile }) => {
   const dateObj = new Date(pulse.created_at);
-  // Formato "24 OUT"
   const day = dateObj.getDate().toString().padStart(2, '0');
   const month = dateObj.toLocaleDateString('pt-BR', { month: 'short' }).toUpperCase().replace('.', '');
   
   const isOwner = pulse.user_id === currentUserId;
   const [reactions, setReactions] = useState<{heart: number, fire: number}>({heart: 0, fire: 0});
   const [myReaction, setMyReaction] = useState<ReactionType | null>(null);
+  
+  // Animação de Double Tap
+  const [showHeartAnimation, setShowHeartAnimation] = useState(false);
 
   useEffect(() => {
     getPulseReactions(pulse.id, currentUserId).then(data => {
@@ -56,12 +59,28 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
       }
   };
 
+  const handleDoubleTap = (e: React.MouseEvent) => {
+      // Bloqueia se for o dono
+      if (isOwner) return;
+      
+      e.stopPropagation(); // Garante que não propague se houver listeners acima
+
+      // Ativa animação
+      setShowHeartAnimation(true);
+      setTimeout(() => setShowHeartAnimation(false), 800);
+
+      // Dá like se não tiver
+      if (myReaction !== 'heart') {
+          handleReaction(e, 'heart');
+      }
+  };
+
   return (
     <div 
-        onClick={() => !isOwner && onClickProfile(pulse.user_id)}
-        className="min-w-[140px] w-[140px] h-[240px] bg-zinc-900 rounded-[4px] relative group snap-start cursor-pointer overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-all active:scale-[0.98]"
+        onDoubleClick={handleDoubleTap}
+        className="min-w-[140px] w-[140px] h-[240px] bg-zinc-900 rounded-[4px] relative group snap-start overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-all select-none"
     >
-      {/* Imagem ou Gradiente */}
+      {/* Imagem ou Gradiente (CORPO - SEM CLIQUE PARA PERFIL) */}
       {pulse.content_type === 'image' ? (
         <img src={pulse.content} alt="Pulse" className="absolute inset-0 w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
       ) : (
@@ -73,26 +92,48 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
       )}
 
       {/* Overlay Escuro */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/90"></div>
+      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/90 pointer-events-none"></div>
+
+      {/* Heart Explosion Animation */}
+      {showHeartAnimation && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+              <Heart size={48} className="text-pink-500 fill-current animate-ping" />
+              <div className="absolute w-20 h-20 bg-pink-500/30 rounded-full blur-xl animate-pulse"></div>
+          </div>
+      )}
 
       {/* Top Info (Data Vertical) */}
-      <div className="absolute top-0 right-0 p-2 flex flex-col items-center">
+      <div className="absolute top-0 right-0 p-2 flex flex-col items-center pointer-events-none">
           <div className="bg-black/50 backdrop-blur-md border border-white/5 px-1.5 py-2 rounded-sm flex flex-col items-center gap-0.5 shadow-lg">
                <span className="text-[10px] font-bold text-white leading-none">{day}</span>
                <span className="text-[8px] font-mono text-zinc-400 uppercase leading-none">{month}</span>
           </div>
       </div>
 
-      {/* User Avatar Badge */}
-      <div className="absolute top-2 left-2">
-          <div className="w-8 h-8 rounded-sm p-[1px] bg-zinc-800 border border-zinc-700">
+      {/* User Avatar Badge (CLIQUE HABILITADO AQUI) */}
+      <div 
+        className="absolute top-2 left-2 cursor-pointer z-10 active:scale-95 transition-transform"
+        onClick={(e) => {
+             e.stopPropagation();
+             if (!isOwner) onClickProfile(pulse.user_id);
+        }}
+      >
+          <div className="w-8 h-8 rounded-sm p-[1px] bg-zinc-800 border border-zinc-700 hover:border-brand-primary transition-colors shadow-lg">
              <img src={pulse.user_avatar} className="w-full h-full object-cover rounded-sm grayscale group-hover:grayscale-0 transition-all" />
           </div>
       </div>
 
       {/* Bottom Actions */}
-      <div className="absolute bottom-0 w-full p-2 flex flex-col gap-2">
-          <p className="text-[10px] font-bold text-white truncate pl-1">{pulse.user_name}</p>
+      <div className="absolute bottom-0 w-full p-2 flex flex-col gap-2 z-10">
+          <p 
+            onClick={(e) => {
+                e.stopPropagation();
+                if (!isOwner) onClickProfile(pulse.user_id);
+            }}
+            className="text-[10px] font-bold text-white truncate pl-1 cursor-pointer hover:text-brand-primary transition-colors w-fit"
+          >
+              {pulse.user_name}
+          </p>
           
           <div className="flex items-center justify-between bg-zinc-900/80 backdrop-blur-md rounded-sm p-1 border border-white/5">
               <div className="flex gap-2">

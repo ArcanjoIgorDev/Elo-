@@ -1,7 +1,7 @@
-
 import React, { useState } from 'react';
-import { ArrowLeft, User, Bell, Lock, Moon, Sun, Trash2, LogOut, Shield, Database, ChevronRight, Smartphone, EyeOff } from 'lucide-react';
+import { ArrowLeft, User, Bell, Lock, Moon, Sun, Trash2, LogOut, Shield, Database, ChevronRight, Smartphone, EyeOff, MapPin, Check } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { updateUserProfileMeta } from '../services/dataService';
 
 interface SettingsScreenProps {
   onBack: () => void;
@@ -17,6 +17,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, onNavigateProfi
   const [notifications, setNotifications] = useState(true);
   const [ghostMode, setGhostMode] = useState(false);
   const [readReceipts, setReadReceipts] = useState(true);
+  const [updatingLocation, setUpdatingLocation] = useState(false);
 
   const toggleZen = () => {
       const newVal = !zenMode;
@@ -29,6 +30,24 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, onNavigateProfi
           localStorage.clear();
           window.location.reload();
       }
+  };
+
+  const handleForceLocationUpdate = () => {
+      if (!navigator.geolocation || !user) return;
+      setUpdatingLocation(true);
+      navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+              const { latitude, longitude } = pos.coords;
+              await updateUserProfileMeta(user.id, { latitude, longitude });
+              setUpdatingLocation(false);
+              alert("Sinal GPS atualizado com sucesso.");
+          },
+          (err) => {
+              console.error(err);
+              setUpdatingLocation(false);
+              alert("Erro ao obter GPS. Verifique permissões.");
+          }
+      );
   };
 
   return (
@@ -55,6 +74,26 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, onNavigateProfi
                         <p className="text-zinc-500 text-xs">@{user?.username}</p>
                     </div>
                     <ChevronRight size={20} className="text-zinc-600 group-hover:text-brand-primary transition-colors"/>
+                </div>
+            </section>
+
+            {/* GPS & Location */}
+             <section>
+                <h2 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-1">Localização & Mapa</h2>
+                <div className="space-y-3">
+                    <button 
+                        onClick={handleForceLocationUpdate}
+                        disabled={updatingLocation}
+                        className="w-full bg-zinc-900/30 border border-zinc-800 rounded-xl p-4 flex items-center gap-4 text-zinc-300 hover:text-brand-primary hover:border-brand-primary/30 transition-all"
+                    >
+                        <div className={`p-2 rounded-lg bg-zinc-800 text-zinc-400 ${updatingLocation ? 'animate-spin' : ''}`}>
+                            <MapPin size={18} />
+                        </div>
+                        <div className="flex-1 text-left">
+                            <h4 className="text-sm font-medium text-zinc-200">Atualizar Satélite GPS</h4>
+                            <p className="text-[10px] text-zinc-500">Sincroniza sua posição para o Neural Map.</p>
+                        </div>
+                    </button>
                 </div>
             </section>
 
@@ -86,7 +125,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, onNavigateProfi
                     <ToggleItem 
                         icon={<EyeOff size={18} />} 
                         label="Modo Fantasma" 
-                        description="Oculte seu status online (Simulado)."
+                        description="Oculte seu status online e GPS."
                         active={ghostMode} 
                         onToggle={() => setGhostMode(!ghostMode)} 
                     />
@@ -117,7 +156,7 @@ const SettingsScreen: React.FC<SettingsScreenProps> = ({ onBack, onNavigateProfi
             </section>
 
             <div className="text-center pt-8 pb-4">
-                <p className="text-[10px] text-zinc-600 font-mono">ELO BUILD 2.4.0 • SECURE CONNECTION</p>
+                <p className="text-[10px] text-zinc-600 font-mono">ELO BUILD 2.5.1 • SECURE CONNECTION</p>
             </div>
         </div>
     </div>
@@ -139,7 +178,5 @@ const ToggleItem = ({ icon, label, description, active, onToggle }: any) => (
         </div>
     </div>
 );
-
-import { Check } from 'lucide-react'; // Import missing icon
 
 export default SettingsScreen;
