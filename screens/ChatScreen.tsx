@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, MoreVertical, ShieldCheck, Thermometer, MapPin, Check, CheckCheck, Loader2, Navigation, Ban } from 'lucide-react';
-import { Message, User } from '../types';
+import { ArrowLeft, Send, MoreVertical, ShieldCheck, Thermometer, MapPin, Check, CheckCheck, Loader2, Navigation, Ban, AlertTriangle, Paperclip, Image as ImageIcon, Mic, Camera } from 'lucide-react';
+import { Message, User, MessageType } from '../types';
 import { fetchMessages, sendMessage, markMessagesAsRead, getUserProfile } from '../services/dataService';
 import { analyzeConversationEmotion } from '../services/aiService';
 import { useAuth } from '../context/AuthContext';
@@ -8,27 +8,34 @@ import { useAuth } from '../context/AuthContext';
 interface ChatScreenProps {
   chatId: string;
   targetUser: User;
+  initialMessage?: string; // Novo Prop
   onBack: () => void;
 }
 
-const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) => {
+const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMessage, onBack }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('');
+  const [inputText, setInputText] = useState(initialMessage || ''); // Inicializa com o contexto se houver
   const [loading, setLoading] = useState(true);
   
   // Status da Conexão
   const [isBlocked, setIsBlocked] = useState(false);
   const [blockedByMe, setBlockedByMe] = useState(false);
   
-  // Location State
+  // Media / Actions State
   const [isSharingLocation, setIsSharingLocation] = useState(false);
+  const [showAttachments, setShowAttachments] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Toast State
+  const [toastMessage, setToastMessage] = useState<{type: 'error' | 'success', text: string} | null>(null);
   
   // AI State
   const [emotion, setEmotion] = useState({ tone: 'Conectando...', intensity: 0 });
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if(!user) return;
@@ -54,7 +61,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
         }
     });
     
-    // Intervalo de atualização
+    // Foca no input se houver mensagem inicial
+    if (initialMessage && inputRef.current) {
+        setTimeout(() => inputRef.current?.focus(), 500);
+    }
+    
     const interval = setInterval(() => {
         fetchMessages(chatId).then(data => {
             setMessages(data);
@@ -64,6 +75,13 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
 
     return () => clearInterval(interval);
   }, [chatId, user, targetUser.id]);
+
+  useEffect(() => {
+      if(toastMessage) {
+          const t = setTimeout(() => setToastMessage(null), 3000);
+          return () => clearTimeout(t);
+      }
+  }, [toastMessage]);
 
   const runEmotionAnalysis = async (msgs: Message[]) => {
       setIsAnalyzing(true);
@@ -78,16 +96,20 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
     }, 100);
   }
 
-  const handleSend = async (location?: {lat: number, lng: number}) => {
-    if (isBlocked || (!inputText.trim() && !location) || !user) return;
+  const handleSend = async (type: MessageType = 'text', content: string = inputText, location?: {lat: number, lng: number}) => {
+    if (isBlocked || !user) return;
+    if (type === 'text' && !content.trim()) return;
     
-    const tempContent = location ? "📍 Localização Compartilhada" : inputText;
-    if(!location) setInputText('');
+    // Reset inputs
+    if(type === 'text') setInputText('');
+    setShowAttachments(false);
 
+    // Optimistic Update
     const optimisticMsg: Message = {
         id: 'temp-' + Date.now(),
         sender_id: user.id,
-        content: tempContent,
+        content: content,
+        type: type,
         created_at: new Date().toISOString(),
         is_read: false,
         location: location
@@ -96,7 +118,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
     setMessages(prev => [...prev, optimisticMsg]);
     scrollToBottom();
 
-    const savedMessage = await sendMessage(tempContent, chatId, user.id, location);
+    const savedMessage = await sendMessage(content, chatId, user.id, type, location);
     
     if (savedMessage) {
         setMessages(prev => prev.map(m => m.id === optimisticMsg.id ? savedMessage : m));
@@ -104,26 +126,40 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
     }
   };
 
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              handleSend('image', reader.result as string);
+          };
+          reader.readAsDataURL(file);
+      }
+  };
+
   const handleShareLocation = () => {
     if (isBlocked) return;
     if (!navigator.geolocation) {
-        console.error("Geolocalização não suportada.");
+        setToastMessage({type: 'error', text: "Geolocalização não suportada."});
         return;
     }
     
     setIsSharingLocation(true);
+    setShowAttachments(false);
     
     navigator.geolocation.getCurrentPosition(
         (pos) => {
             const { latitude, longitude } = pos.coords;
-            handleSend({ lat: latitude, lng: longitude });
+            handleSend('location', '📍 Localização Compartilhada', { lat: latitude, lng: longitude });
             setIsSharingLocation(false);
         }, 
         (err) => {
-            console.error("Erro GPS:", err);
+            let msg = "Erro ao obter localização.";
+            if (err.code === 1) msg = "Permissão de localização negada.";
+            setToastMessage({type: 'error', text: msg});
             setIsSharingLocation(false);
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
@@ -134,7 +170,17 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
   };
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-zinc-950">
+    <div className="flex flex-col h-[100dvh] bg-zinc-950 relative">
+      
+      {toastMessage && (
+          <div className={`absolute top-20 left-1/2 -translate-x-1/2 z-[60] px-6 py-2 rounded-full shadow-lg font-bold text-xs animate-fade-in flex items-center gap-2 ${
+              toastMessage.type === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-zinc-100 text-zinc-950'
+          }`}>
+              {toastMessage.type === 'error' ? <AlertTriangle size={14} /> : <Check size={14} />}
+              {toastMessage.text}
+          </div>
+      )}
+
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-4 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 sticky top-0 z-20 shrink-0">
         <div className="flex items-center gap-3">
@@ -149,7 +195,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
             ) : (
                 <img 
                     src={targetUser.avatar_url || `https://ui-avatars.com/api/?name=${targetUser.name}&background=random`} 
-                    className="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-800" 
+                    className="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-800 object-cover" 
                     alt="Avatar" 
                 />
             )}
@@ -175,7 +221,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
 
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar">
-        {/* Aviso de Bloqueio */}
         {isBlocked && (
             <div className="flex justify-center my-4 animate-fade-in">
                 <div className="bg-zinc-900 border border-zinc-800 px-4 py-2 rounded-lg flex items-center gap-2">
@@ -208,20 +253,23 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
              </div>
         ) : (
             messages.map((msg) => {
-            // Se sender_id for null (usuário deletado) e não fui eu (user.id), renderiza à esquerda
             const isMe = msg.sender_id === user?.id; 
             
             return (
                 <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                 <div 
-                    className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm leading-relaxed relative group shadow-sm ${
+                    className={`max-w-[80%] rounded-2xl text-sm leading-relaxed relative group shadow-sm overflow-hidden ${
                     isMe 
                         ? 'bg-zinc-100 text-zinc-950 rounded-br-none' 
                         : 'bg-zinc-800 text-zinc-200 rounded-bl-none border border-zinc-700'
-                    }`}
+                    } ${msg.type === 'image' ? 'p-1' : 'px-4 py-3'}`}
                 >
-                    {/* Location Content */}
-                    {msg.location ? (
+                    {/* Render Content Based on Type */}
+                    {msg.type === 'image' ? (
+                        <div className="relative">
+                            <img src={msg.content} alt="Foto" className="rounded-xl w-full max-w-[250px] object-cover" />
+                        </div>
+                    ) : msg.type === 'location' && msg.location ? (
                         <div className="flex flex-col gap-2 min-w-[180px]">
                             <div className="flex items-center gap-2 font-bold opacity-90 border-b border-black/5 pb-2 mb-1">
                                 <Navigation size={14} className={isMe ? 'text-brand-primary' : 'text-zinc-400'} />
@@ -251,15 +299,15 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
                             </a>
                         </div>
                     ) : (
-                        msg.content
+                        <span className="whitespace-pre-wrap">{msg.content}</span>
                     )}
 
-                    <div className={`flex items-center justify-end gap-1 mt-1 opacity-60 ${isMe ? 'text-zinc-700' : 'text-zinc-500'}`}>
+                    <div className={`flex items-center justify-end gap-1 mt-1 opacity-60 ${isMe ? 'text-zinc-700' : 'text-zinc-500'} ${msg.type === 'image' ? 'pr-2 pb-1 text-white drop-shadow-md' : ''}`}>
                         <span className="text-[9px]">
                             {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                         </span>
                         {isMe && (
-                             msg.is_read ? <CheckCheck size={12} className="text-blue-600" /> : <Check size={12} />
+                             msg.is_read ? <CheckCheck size={12} className={msg.type === 'image' ? 'text-white' : 'text-blue-600'} /> : <Check size={12} />
                         )}
                     </div>
                 </div>
@@ -272,42 +320,68 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, onBack }) =
 
       {/* Input Area - Desativada se Bloqueado ou Usuário Deletado */}
       {!isBlocked && !targetUser.is_deleted && (
-          <div className="p-4 bg-zinc-950/90 backdrop-blur-md border-t border-zinc-900 pb-safe shrink-0">
-            <div className="flex items-center gap-2">
+          <div className="p-3 bg-zinc-950/90 backdrop-blur-md border-t border-zinc-900 pb-safe shrink-0">
+             
+             {/* Attachments Menu */}
+             {showAttachments && (
+                 <div className="absolute bottom-20 left-4 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3 flex gap-4 animate-fade-in z-30">
+                     <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-brand-primary transition-colors">
+                         <div className="w-12 h-12 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                             <ImageIcon size={24} />
+                         </div>
+                         <span className="text-[10px]">Galeria</span>
+                     </button>
+                     <button onClick={handleShareLocation} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-brand-primary transition-colors">
+                         <div className="w-12 h-12 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                             <MapPin size={24} />
+                         </div>
+                         <span className="text-[10px]">Local</span>
+                     </button>
+                     <button onClick={() => { setToastMessage({type: 'success', text: 'Audio em breve!'}); setShowAttachments(false); }} className="flex flex-col items-center gap-1 text-zinc-400 hover:text-brand-primary transition-colors opacity-50">
+                         <div className="w-12 h-12 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center">
+                             <Mic size={24} />
+                         </div>
+                         <span className="text-[10px]">Áudio</span>
+                     </button>
+                 </div>
+             )}
+             
+             <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect}/>
+
+            <div className="flex items-end gap-2">
                 <button 
-                    onClick={handleShareLocation}
-                    disabled={isSharingLocation}
-                    className={`w-10 h-10 rounded-full border border-zinc-800 flex items-center justify-center transition-all ${
-                        isSharingLocation ? 'bg-zinc-800 text-brand-primary cursor-wait' : 'text-zinc-500 hover:text-zinc-100 hover:bg-zinc-900'
+                    onClick={() => setShowAttachments(!showAttachments)}
+                    className={`w-10 h-10 mb-1 rounded-full flex items-center justify-center transition-all ${
+                        showAttachments ? 'bg-zinc-800 text-brand-primary' : 'text-zinc-500 hover:bg-zinc-900'
                     }`}
-                    title="Compartilhar Localização"
                 >
-                    {isSharingLocation ? <Loader2 size={18} className="animate-spin" /> : <MapPin size={18} />}
+                    <Paperclip size={20} className={showAttachments ? 'rotate-45' : ''} />
                 </button>
-                <div className="flex-1 flex items-center gap-3 bg-zinc-900 border border-zinc-800 p-2 rounded-full pl-4 focus-within:border-zinc-600 transition-colors">
-                    <ShieldCheck size={18} className="text-zinc-600" />
+
+                <div className="flex-1 min-h-[44px] bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-2 focus-within:border-zinc-600 transition-colors flex items-center gap-2">
                     <input 
+                        ref={inputRef}
                         type="text" 
                         value={inputText}
                         onChange={(e) => setInputText(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                        placeholder="Escreva com consciência..."
-                        className="flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-600 outline-none"
+                        onKeyDown={(e) => e.key === 'Enter' && handleSend('text')}
+                        placeholder="Mensagem..."
+                        className="flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-600 outline-none max-h-24"
                     />
-                    <button 
-                        onClick={() => handleSend()}
-                        className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                            inputText.trim() ? 'bg-zinc-100 text-zinc-950' : 'bg-zinc-800 text-zinc-500'
-                        }`}
-                    >
-                        <Send size={18} />
-                    </button>
                 </div>
+
+                <button 
+                    onClick={() => handleSend('text')}
+                    className={`w-10 h-10 mb-1 rounded-full flex items-center justify-center transition-all shadow-lg ${
+                        inputText.trim() ? 'bg-brand-primary text-zinc-950 scale-100' : 'bg-zinc-800 text-zinc-500 scale-90'
+                    }`}
+                >
+                    {inputText.trim() ? <Send size={18} /> : <Mic size={18} />}
+                </button>
             </div>
           </div>
       )}
       
-      {/* Aviso Footer se bloqueado */}
       {(isBlocked || targetUser.is_deleted) && (
           <div className="p-4 bg-zinc-950 border-t border-zinc-900 pb-safe text-center">
               <p className="text-xs text-zinc-600 italic">

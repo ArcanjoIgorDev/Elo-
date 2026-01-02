@@ -9,10 +9,13 @@ export interface User {
   is_deleted?: boolean; // Novo: Para UI
 }
 
+export type MessageType = 'text' | 'image' | 'audio' | 'location';
+
 export interface Message {
   id: string;
   sender_id: string | null; // Pode ser null se usuario deletado
-  content: string;
+  content: string; // Se for imagem, aqui vai o base64
+  type?: MessageType; // Novo campo
   created_at: string;
   is_read: boolean;
   location?: {
@@ -78,8 +81,9 @@ export interface ChatSummary {
     avatar_url: string;
     is_deleted?: boolean; // Novo
   };
-  lastMessage: Message;
+  lastMessage?: Message; // Opcional: Amigos novos podem não ter mensagens ainda
   unreadCount: number;
+  isNewConnection?: boolean; // Helper para UI
 }
 
 export interface Notification {

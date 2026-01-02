@@ -9,6 +9,7 @@ interface AuthContextType {
   signIn: (identifier: string, password: string) => Promise<{data: any; error: any}>; 
   signUp: (username: string, password: string, name: string, phone: string) => Promise<{data: any; error: any}>;
   signOut: () => Promise<void>;
+  updateUser: (updates: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -20,7 +21,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        mapSessionToUser(session);
+        fetchFullUserProfile(session.user.id, session);
       } else {
         setLoading(false);
       }
@@ -28,7 +29,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        mapSessionToUser(session);
+        fetchFullUserProfile(session.user.id, session);
       } else {
         setUser(null);
         setLoading(false);
@@ -38,17 +39,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
-  const mapSessionToUser = (session: Session) => {
-    const metadata = session.user.user_metadata || {};
-    setUser({
-      id: session.user.id,
-      email: session.user.email!, 
-      name: metadata.name || 'Usuário',
-      username: metadata.username,
-      phone: metadata.phone,
-      avatar_url: metadata.avatar_url,
-    });
-    setLoading(false);
+  const fetchFullUserProfile = async (userId: string, session: Session) => {
+      // Tenta buscar da tabela users_meta para garantir que temos bio e avatar atualizados
+      const { data: meta } = await supabase
+          .from('users_meta')
+          .select('*')
+          .eq('user_id', userId)
+          .single();
+      
+      const metadata = session.user.user_metadata || {};
+
+      setUser({
+          id: session.user.id,
+          email: session.user.email!,
+          name: meta?.name || metadata.name || 'Usuário',
+          username: meta?.username || metadata.username,
+          phone: meta?.phone || metadata.phone,
+          avatar_url: meta?.avatar_url || metadata.avatar_url,
+          bio: meta?.bio || ''
+      });
+      setLoading(false);
   };
 
   const signIn = async (identifier: string, password: string) => {
@@ -88,7 +98,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (error) return { data, error };
 
     // 2. CRUCIAL: Força a inserção na tabela pública 'users_meta' caso a trigger do banco falhe ou não exista.
-    // Isso garante que o usuário seja encontrado na busca de amigos imediatamente.
     if (data.user) {
         const { error: metaError } = await supabase
             .from('users_meta')
@@ -99,11 +108,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 avatar_url: avatarUrl,
                 phone: phone,
                 bio: ''
-            }, { onConflict: 'user_id' }); // Se já existir (pela trigger), apenas atualiza
+            }, { onConflict: 'user_id' }); 
             
         if (metaError) {
             console.error("Erro ao sincronizar perfil público:", metaError);
-            // Não bloqueia o fluxo, mas loga o erro
         }
     }
     
@@ -115,8 +123,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
+  const updateUser = (updates: Partial<User>) => {
+      setUser(prev => prev ? { ...prev, ...updates } : null);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

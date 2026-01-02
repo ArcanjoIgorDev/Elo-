@@ -1,4 +1,4 @@
-import { Pulse, Message, EcoData, SearchResult, ChatSummary, User, EmotionalState, Topic, ReactionType, PulseReactionCounts, Notification } from '../types';
+import { Pulse, Message, EcoData, SearchResult, ChatSummary, User, EmotionalState, Topic, ReactionType, PulseReactionCounts, Notification, MessageType } from '../types';
 import { supabase } from '../lib/supabaseClient';
 
 // --- HELPER: Gera ID único para conversa entre dois usuários ---
@@ -53,6 +53,60 @@ export const toggleBlockUser = async (friendshipId: string, block: boolean, curr
         return true;
     } catch (e) {
         console.error("Erro ao bloquear:", e);
+        return false;
+    }
+};
+
+export const removeFriend = async (friendshipId: string): Promise<boolean> => {
+    try {
+        const { error } = await supabase
+            .from('friendships')
+            .delete()
+            .eq('id', friendshipId);
+        
+        if (error) throw error;
+        return true;
+    } catch (e) {
+        console.error("Erro ao remover amigo:", e);
+        return false;
+    }
+};
+
+export const getFriendsCount = async (userId: string): Promise<number> => {
+    try {
+        // Query A: Eu sou user_id
+        const { count: countA, error: errorA } = await supabase
+            .from('friendships')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_id', userId)
+            .eq('status', 'accepted');
+
+        // Query B: Eu sou friend_id
+        const { count: countB, error: errorB } = await supabase
+            .from('friendships')
+            .select('*', { count: 'exact', head: true })
+            .eq('friend_id', userId)
+            .eq('status', 'accepted');
+        
+        if (errorA || errorB) return 0;
+        return (countA || 0) + (countB || 0);
+    } catch (e) {
+        return 0;
+    }
+}
+
+// --- UPDATE PROFILE ---
+export const updateUserProfileMeta = async (userId: string, updates: { bio?: string, avatar_url?: string }): Promise<boolean> => {
+    try {
+        const { error } = await supabase
+            .from('users_meta')
+            .update(updates)
+            .eq('user_id', userId);
+        
+        if (error) throw error;
+        return true;
+    } catch (e) {
+        console.error("Erro ao atualizar perfil:", e);
         return false;
     }
 };
@@ -198,61 +252,121 @@ export const togglePulseReaction = async (pulseId: string, userId: string, type:
     }
 };
 
+// --- CHAT & FRIENDS FETCHING (REWRITTEN FOR "NEW CONNECTIONS") ---
 export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary[]> => {
     try {
-        const { data: messages, error } = await supabase
+        // 1. Busca TODAS as amizades aceitas primeiro
+        const { data: friendshipsA } = await supabase
+            .from('friendships')
+            .select('friend_id, created_at')
+            .eq('user_id', currentUserId)
+            .eq('status', 'accepted');
+            
+        const { data: friendshipsB } = await supabase
+            .from('friendships')
+            .select('user_id, created_at')
+            .eq('friend_id', currentUserId)
+            .eq('status', 'accepted');
+
+        // Consolida IDs de amigos
+        const friendIds: string[] = [];
+        const friendshipDates = new Map<string, string>(); // friendId -> date
+
+        friendshipsA?.forEach((f: any) => {
+             friendIds.push(f.friend_id);
+             friendshipDates.set(f.friend_id, f.created_at);
+        });
+        friendshipsB?.forEach((f: any) => {
+             friendIds.push(f.user_id);
+             friendshipDates.set(f.user_id, f.created_at);
+        });
+
+        if (friendIds.length === 0) return [];
+
+        // 2. Busca Detalhes dos Usuários (Amigos)
+        const { data: usersData } = await supabase
+            .from('users_meta')
+            .select('user_id, name, username, avatar_url')
+            .in('user_id', friendIds);
+        
+        const friendsMap = new Map<string, any>();
+        usersData?.forEach((u: any) => friendsMap.set(u.user_id, u));
+
+        // 3. Busca MENSAGENS recentes para determinar conversas ativas
+        const { data: rawMessages } = await supabase
             .from('messages')
             .select('*')
             .ilike('chat_id', `%${currentUserId}%`)
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false }); // As mais recentes primeiro
 
-        if (error) throw error;
-        if (!messages) return [];
+        // Injeta tipo baseado no conteúdo, já que a coluna 'type' não existe no DB
+        const messages = (rawMessages || []).map((m: any) => ({
+            ...m,
+            type: m.location ? 'location' : (m.content && m.content.startsWith('data:image') ? 'image' : 'text')
+        }));
 
-        const chatMap = new Map<string, ChatSummary>();
-        const userCache = new Map<string, any>();
+        // 4. Processa e Agrupa
+        const chats: ChatSummary[] = [];
+        const processedFriendIds = new Set<string>();
+        const chatsWithUnread: { [chatId: string]: number } = {};
 
-        for (const msg of messages) {
-            if (!chatMap.has(msg.chat_id)) {
+        // Helper para contar mensagens não lidas por chat
+        if (messages) {
+            messages.forEach((m: any) => {
+                 if (!m.is_read && m.sender_id !== currentUserId) {
+                     chatsWithUnread[m.chat_id] = (chatsWithUnread[m.chat_id] || 0) + 1;
+                 }
+            });
+
+            for (const msg of messages) {
                 const ids = msg.chat_id.split('_');
                 const otherId = ids.find((id: string) => id !== currentUserId);
-                
-                if (otherId) {
-                    let userData = userCache.get(otherId);
 
-                    if (!userData) {
-                        const { data } = await supabase
-                            .from('users_meta')
-                            .select('name, username, avatar_url')
-                            .eq('user_id', otherId)
-                            .single();
-                        
-                        userData = data || {
-                            name: 'Usuário Excluído',
-                            username: 'desconhecido',
-                            avatar_url: '',
-                            is_deleted: true
-                        };
-                        userCache.set(otherId, userData);
-                    }
+                if (otherId && !processedFriendIds.has(otherId) && friendsMap.has(otherId)) {
+                    processedFriendIds.add(otherId);
+                    const friend = friendsMap.get(otherId);
 
-                    chatMap.set(msg.chat_id, {
+                    chats.push({
                         chatId: msg.chat_id,
                         otherUser: {
-                            id: otherId,
-                            name: userData.name,
-                            username: userData.username,
-                            avatar_url: userData.avatar_url,
-                            is_deleted: userData.is_deleted
+                            id: friend.user_id,
+                            name: friend.name,
+                            username: friend.username,
+                            avatar_url: friend.avatar_url,
+                            is_deleted: false
                         },
                         lastMessage: msg,
-                        unreadCount: 0 
+                        unreadCount: chatsWithUnread[msg.chat_id] || 0,
+                        isNewConnection: false
                     });
                 }
             }
         }
 
-        return Array.from(chatMap.values());
+        // B. Novas Conexões (Amigos que ainda NÃO têm mensagens)
+        for (const friendId of friendIds) {
+            if (!processedFriendIds.has(friendId)) {
+                const friend = friendsMap.get(friendId);
+                if (friend) {
+                     chats.push({
+                        chatId: getChatId(currentUserId, friendId),
+                        otherUser: {
+                            id: friend.user_id,
+                            name: friend.name,
+                            username: friend.username,
+                            avatar_url: friend.avatar_url,
+                            is_deleted: false
+                        },
+                        // lastMessage é undefined
+                        unreadCount: 0,
+                        isNewConnection: true
+                    });
+                }
+            }
+        }
+        
+        return chats;
+
     } catch (e: any) {
         console.error('Erro ao buscar chats:', e.message);
         return [];
@@ -273,7 +387,6 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
         if (error) throw error;
         
         const results = await Promise.all(users.map(async (u: any) => {
-            // Consulta simplificada para evitar erros de sintaxe no .or complexo
             const { data: friendshipA } = await supabase
                 .from('friendships')
                 .select('status, blocked_by, user_id, friend_id')
@@ -290,16 +403,12 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
 
             const friendship = friendshipA || friendshipB;
 
-            // Lógica de Status
             let status = null;
             if (friendship) {
                 if (friendship.status === 'blocked' && friendship.blocked_by === u.user_id) {
                     return null; // Não mostrar se fui bloqueado
                 }
                 status = friendship.status;
-                
-                // Se o status for rejected e eu fui quem pediu, mostrar como se não tivesse nada (para tentar de novo se quiser)
-                // OU mostrar 'rejected' para feedback
                 if (status === 'rejected') status = null; 
             }
 
@@ -327,7 +436,6 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
 
 export const sendFriendRequest = async (currentUserId: string, targetUserId: string) => {
     try {
-        // Verificar se já existe uma amizade ou pedido (mesmo que rejeitado)
         const { data: existingA } = await supabase.from('friendships')
             .select('*').eq('user_id', currentUserId).eq('friend_id', targetUserId).single();
             
@@ -337,25 +445,22 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
         const existing = existingA || existingB;
 
         if (existing) {
-            // Se foi rejeitada, atualiza para pending novamente
             if (existing.status === 'rejected') {
                 const { error } = await supabase
                     .from('friendships')
                     .update({ 
                         status: 'pending', 
-                        user_id: currentUserId, // Importante: quem pede agora é o currentUser
+                        user_id: currentUserId, 
                         friend_id: targetUserId,
                         blocked_by: null,
-                        // Removed updated_at as it does not exist
                     })
                     .eq('id', existing.id);
                 if (error) throw error;
                 return true;
             }
-            return true; // Já existe (pending ou accepted)
+            return true; 
         }
 
-        // Se não existe, cria nova
         const { error } = await supabase
             .from('friendships')
             .insert([{ 
@@ -373,13 +478,8 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
     }
 };
 
-// --- NOVO SISTEMA DE NOTIFICAÇÕES (Pedidos + Status) ---
-
 export const fetchNotifications = async (currentUserId: string): Promise<Notification[]> => {
     try {
-        // Correção: Removido 'updated_at' da query pois a coluna não existe no banco.
-        
-        // Query 1: Pedidos que recebi (Eu sou friend_id e status é pending)
         const { data: incoming, error: errorIncoming } = await supabase
             .from('friendships')
             .select('id, user_id, friend_id, status, created_at')
@@ -388,7 +488,6 @@ export const fetchNotifications = async (currentUserId: string): Promise<Notific
 
         if (errorIncoming) throw errorIncoming;
 
-        // Query 2: Respostas aos meus pedidos (Eu sou user_id e status é accepted/rejected)
         const { data: updates, error: errorUpdates } = await supabase
             .from('friendships')
             .select('id, user_id, friend_id, status, created_at')
@@ -397,10 +496,8 @@ export const fetchNotifications = async (currentUserId: string): Promise<Notific
 
         if (errorUpdates) throw errorUpdates;
 
-        // Mesclar
         const requests = [...(incoming || []), ...(updates || [])];
 
-        // Ordenar por created_at (melhor aproximação disponível)
         requests.sort((a, b) => {
             const dateA = new Date(a.created_at).getTime();
             const dateB = new Date(b.created_at).getTime();
@@ -410,9 +507,7 @@ export const fetchNotifications = async (currentUserId: string): Promise<Notific
         const notifications: Notification[] = [];
 
         for (const req of requests) {
-            // Determinar o "outro" usuário
             const isIncomingRequest = req.friend_id === currentUserId && req.status === 'pending';
-            
             const otherUserId = isIncomingRequest ? req.user_id : req.friend_id;
 
             const { data: u } = await supabase
@@ -421,7 +516,7 @@ export const fetchNotifications = async (currentUserId: string): Promise<Notific
                 .eq('user_id', otherUserId)
                 .single();
 
-            if (!u) continue; // Usuário deletado
+            if (!u) continue; 
 
             let type: 'FRIEND_REQUEST' | 'REQUEST_ACCEPTED' | 'REQUEST_REJECTED' | null = null;
             
@@ -456,10 +551,8 @@ export const fetchNotifications = async (currentUserId: string): Promise<Notific
 export const clearNotification = async (notificationId: string, type: string) => {
     try {
         if (type === 'REQUEST_REJECTED') {
-            // Se foi rejeitado e o usuário viu, podemos limpar do banco para ele poder pedir de novo no futuro
             await supabase.from('friendships').delete().eq('id', notificationId);
         }
-        // Se for accepted, a UI filtra localmente até expirar o tempo (3 dias) ou o usuário pode dispensar na sessão (UI state)
         return true;
     } catch (e) {
         return false;
@@ -467,7 +560,6 @@ export const clearNotification = async (notificationId: string, type: string) =>
 }
 
 export const fetchPendingRequests = async (currentUserId: string) => {
-    // Mantido para compatibilidade
     const notifs = await fetchNotifications(currentUserId);
     return notifs.filter(n => n.type === 'FRIEND_REQUEST').map(n => ({
         requestId: n.id,
@@ -477,7 +569,6 @@ export const fetchPendingRequests = async (currentUserId: string) => {
 
 export const respondToFriendRequest = async (requestId: string, accept: boolean) => {
     try {
-        // Correção: Removido 'updated_at' do update payload
         if (accept) {
             await supabase
                 .from('friendships')
@@ -496,10 +587,8 @@ export const respondToFriendRequest = async (requestId: string, accept: boolean)
     }
 };
 
-// --- GET USER PROFILE (Correção de Bug) ---
 export const getUserProfile = async (userId: string, currentUserId: string): Promise<{user: User, friendship: any} | null> => {
     try {
-        // 1. Busca Perfil (Independente de amizade)
         const { data: userData, error: userError } = await supabase
             .from('users_meta')
             .select('*')
@@ -507,11 +596,9 @@ export const getUserProfile = async (userId: string, currentUserId: string): Pro
             .single();
         
         if (userError || !userData) {
-            console.log("Usuário não encontrado:", userId);
             return null;
         }
 
-        // 2. Busca Status Amizade (Pode não existir, não deve quebrar a função)
         let friendship = null;
         
         const { data: friendshipA } = await supabase
@@ -542,7 +629,6 @@ export const getUserProfile = async (userId: string, currentUserId: string): Pro
             friendship: friendship
         };
     } catch (e) {
-        console.error("Erro no getUserProfile", e);
         return null;
     }
 };
@@ -557,7 +643,13 @@ export const fetchMessages = async (chatId: string): Promise<Message[]> => {
       .limit(100);
 
     if (error) throw error;
-    return data as Message[] || [];
+    
+    // Mapeamento manual de tipo, pois a coluna não existe no banco
+    return (data || []).map((m: any) => ({
+        ...m,
+        type: m.location ? 'location' : (m.content && m.content.startsWith('data:image') ? 'image' : 'text')
+    })) as Message[];
+
   } catch (e: any) {
     console.error('Erro ao buscar mensagens:', e.message);
     return [];
@@ -577,15 +669,22 @@ export const markMessagesAsRead = async (chatId: string, userId: string) => {
     }
 };
 
-export const sendMessage = async (content: string, chatId: string, userId: string, location?: {lat: number, lng: number}): Promise<Message | null> => {
+export const sendMessage = async (
+    content: string, 
+    chatId: string, 
+    userId: string, 
+    type: MessageType = 'text',
+    location?: {lat: number, lng: number}
+): Promise<Message | null> => {
     try {
         const newMessage = {
             content,
-            sender_id: String(userId), // UUID string é uma string válida
+            sender_id: String(userId),
             chat_id: chatId,
             created_at: new Date().toISOString(),
             is_read: false,
-            location: location || null
+            location: location || null,
+            // type: type // REMOVIDO: A coluna type não existe no banco. Inferimos no fetch.
         };
 
         const { data, error } = await supabase
@@ -596,7 +695,12 @@ export const sendMessage = async (content: string, chatId: string, userId: strin
 
         if (error) throw error;
 
-        return data as Message;
+        // Retorna o objeto completo para a UI usar (incluindo o tipo que o front já sabe)
+        return {
+            ...data,
+            type: type
+        } as Message;
+
     } catch (e: any) {
         console.error('Erro ao enviar mensagem:', e.message);
         return null;

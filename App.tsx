@@ -7,6 +7,7 @@ import ChatScreen from './screens/ChatScreen';
 import EcoScreen from './screens/EcoScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import { AppScreen, User } from './types';
+import { getChatId } from './services/dataService';
 
 const AppContent: React.FC = () => {
   const { user, loading, signOut } = useAuth();
@@ -14,6 +15,7 @@ const AppContent: React.FC = () => {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chatTargetUser, setChatTargetUser] = useState<User | null>(null);
   const [viewProfileId, setViewProfileId] = useState<string | null>(null);
+  const [chatInitialMessage, setChatInitialMessage] = useState<string | undefined>(undefined);
 
   if (loading) {
     return (
@@ -30,6 +32,16 @@ const AppContent: React.FC = () => {
   const handleOpenChat = (chatId: string, targetUser: User) => {
       setSelectedChatId(chatId);
       setChatTargetUser(targetUser);
+      setChatInitialMessage(undefined); // Limpa contexto anterior
+      setCurrentScreen(AppScreen.CHAT);
+  };
+
+  const handleStartChatFromProfile = (targetUser: User, initialContext?: string) => {
+      if (!user) return;
+      const chatId = getChatId(user.id, targetUser.id);
+      setSelectedChatId(chatId);
+      setChatTargetUser(targetUser);
+      setChatInitialMessage(initialContext);
       setCurrentScreen(AppScreen.CHAT);
   };
 
@@ -44,9 +56,11 @@ const AppContent: React.FC = () => {
         <ChatScreen 
             chatId={selectedChatId} 
             targetUser={chatTargetUser}
+            initialMessage={chatInitialMessage}
             onBack={() => {
                 setSelectedChatId(null);
                 setChatTargetUser(null);
+                setChatInitialMessage(undefined);
                 setCurrentScreen(AppScreen.HOME);
             }} 
         />
@@ -59,6 +73,7 @@ const AppContent: React.FC = () => {
             targetUserId={viewProfileId}
             onBack={() => setCurrentScreen(AppScreen.HOME)}
             onSignOut={() => {}}
+            onStartChat={handleStartChatFromProfile}
           />
       );
   }
@@ -69,6 +84,7 @@ const AppContent: React.FC = () => {
             <ProfileScreen 
                 onBack={() => setCurrentScreen(AppScreen.HOME)}
                 onSignOut={signOut}
+                onStartChat={handleStartChatFromProfile}
             />
           </Layout>
       )

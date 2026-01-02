@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { fetchPulses, createPulse, fetchUserChats, searchUsers, getChatId, sendFriendRequest, fetchNotifications, respondToFriendRequest, fetchDailyTopic, clearNotification } from '../services/dataService';
+import { fetchPulses, createPulse, fetchUserChats, searchUsers, getChatId, sendFriendRequest, fetchNotifications, respondToFriendRequest, fetchDailyTopic, clearNotification, getFriendsCount } from '../services/dataService';
 import { Pulse, AppScreen, ChatSummary, User, EmotionalState, Notification } from '../types';
 import PulseCard from '../components/PulseCard';
-import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Smile, Frown, Meh, Battery, BatteryCharging, Hash, Hexagon, User as UserIcon, Check, Bell, Flame, PenTool, ArrowRight, UserCheck, UserX } from 'lucide-react';
+import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Smile, Frown, Meh, Battery, BatteryCharging, Hash, Hexagon, User as UserIcon, Check, Bell, Flame, PenTool, ArrowRight, UserCheck, UserX, Sparkles, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface HomeScreenProps {
@@ -16,6 +16,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [friendCount, setFriendCount] = useState(0);
   
   // Create Vibe State
   const [isCreatingPulse, setIsCreatingPulse] = useState(false);
@@ -42,22 +43,20 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   useEffect(() => {
     if (user) {
         refreshData();
-        // Polling para notificações em tempo real (simulado)
         const interval = setInterval(() => {
             fetchNotifications(user.id).then(setNotifications);
-        }, 10000);
+            fetchUserChats(user.id).then(setChats); // Atualizar chats também para contar msg não lidas
+        }, 5000); // Polling mais rápido para mensagens
         return () => clearInterval(interval);
     }
   }, [user]);
 
-  // Foca no textarea quando abre o modal de criar pulse
   useEffect(() => {
       if (isCreatingPulse && textAreaRef.current) {
           setTimeout(() => textAreaRef.current?.focus(), 100);
       }
   }, [isCreatingPulse]);
 
-  // Toast Timer
   useEffect(() => {
       if(toastMessage) {
           const t = setTimeout(() => setToastMessage(null), 3000);
@@ -73,12 +72,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
         fetchPulses(),
         fetchUserChats(user!.id),
         fetchNotifications(user!.id),
-        fetchDailyTopic()
-    ]).then(([pulsesData, chatsData, notifData, topicData]) => {
+        fetchDailyTopic(),
+        getFriendsCount(user!.id)
+    ]).then(([pulsesData, chatsData, notifData, topicData, count]) => {
         setPulses(pulsesData);
         setChats(chatsData);
         setNotifications(notifData);
         if(topicData) setDailyTopic(topicData.title);
+        setFriendCount(count);
         setLoading(false);
     });
   };
@@ -160,7 +161,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   const handleRespondRequest = async (reqId: string, accept: boolean) => {
       const success = await respondToFriendRequest(reqId, accept);
       if (success) {
-          // Otimistic update
           setNotifications(prev => prev.filter(n => n.id !== reqId));
           showToast(accept ? "Conexão aceita!" : "Solicitação recusada.");
           if(accept) refreshData(); 
@@ -194,10 +194,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       { key: 'focado', icon: <Zap size={18} />, label: 'Foco' },
   ];
 
+  const activeChats = chats.filter(c => !c.isNewConnection);
+  const newConnections = chats.filter(c => c.isNewConnection);
+
   return (
     <div className="pb-24 h-full flex flex-col bg-zinc-950 relative">
       
-      {/* Toast Notification */}
       {toastMessage && (
           <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[60] bg-zinc-100 text-zinc-950 px-6 py-2 rounded-full shadow-lg font-bold text-xs animate-fade-in flex items-center gap-2">
               <Check size={14} />
@@ -228,9 +230,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
              
              <button 
                 onClick={() => setIsAddingFriend(true)}
-                className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors relative"
             >
                 <UserPlus size={18} />
+                {friendCount > 0 && (
+                    <span className="absolute -bottom-1 -right-1 bg-zinc-800 text-[9px] w-4 h-4 flex items-center justify-center rounded-full border border-zinc-900 text-zinc-400 font-bold">
+                        {friendCount}
+                    </span>
+                )}
             </button>
             <button 
                 onClick={() => onNavigate(AppScreen.PROFILE)}
@@ -266,7 +273,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                  ) : (
                      notifications.map(notif => (
                          <div key={notif.id} className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex items-center gap-4 relative overflow-hidden group">
-                             {/* Indicador lateral */}
                              <div className={`absolute left-0 top-0 bottom-0 w-1 ${notif.type === 'FRIEND_REQUEST' ? 'bg-brand-primary' : notif.type === 'REQUEST_REJECTED' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
                              
                              <img src={notif.user.avatar_url} className="w-10 h-10 rounded-full bg-zinc-800" />
@@ -395,8 +401,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                                  <h3 className="text-zinc-100 font-semibold truncate">{result.user.name}</h3>
                                  <p className="text-zinc-500 text-xs truncate">@{result.user.username}</p>
                              </div>
-                             
-                             {/* Botões de Ação baseados no Status */}
                              {result.friendshipStatus === 'accepted' ? (
                                  <button onClick={() => { if(onChatSelect) onChatSelect(getChatId(user!.id, result.user.id), result.user); setIsAddingFriend(false); }} className="p-2.5 bg-brand-primary text-zinc-950 rounded-full hover:scale-105 transition-transform"><MessageCircle size={20} /></button>
                              ) : result.friendshipStatus === 'pending' ? (
@@ -422,7 +426,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       {/* --- FEED --- */}
       <div className="flex-1 overflow-y-auto no-scrollbar space-y-8 pt-4">
         
-        {/* Daily Topic - Redesign */}
+        {/* Daily Topic */}
         <div className="px-6">
             <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800/80 p-5 rounded-3xl relative overflow-hidden group shadow-lg">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/10 rounded-full blur-2xl -mr-10 -mt-10 pointer-events-none"></div>
@@ -450,7 +454,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
             </div>
         </div>
             
-        {/* Vibe Section - Scroll Melhorado */}
+        {/* Vibe Section */}
         <section className="">
             <div className="flex items-center justify-between mb-4 px-6">
                 <h2 className="text-sm font-semibold text-zinc-200 tracking-tight flex items-center gap-2">
@@ -483,39 +487,115 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                         />
                     ))
                 }
-                {/* Espaçador para o último item não colar na borda */}
                 <div className="min-w-[10px] shrink-0"></div>
             </div>
         </section>
 
-        {/* Chats Section */}
+        {/* New Connections */}
+        {newConnections.length > 0 && (
+            <section className="">
+                <div className="flex items-center justify-between mb-4 px-6">
+                    <h2 className="text-sm font-semibold text-zinc-200 tracking-tight flex items-center gap-2">
+                        <Sparkles size={16} className="text-brand-secondary" />
+                        Novas Conexões
+                    </h2>
+                    <span className="text-[10px] bg-brand-secondary/10 text-brand-secondary px-2 py-0.5 rounded-full font-bold">{newConnections.length}</span>
+                </div>
+                
+                <div className="flex overflow-x-auto no-scrollbar pb-2 px-6 gap-3 snap-x snap-mandatory scroll-pl-6">
+                    {newConnections.map(chat => (
+                        <div 
+                            key={chat.chatId} 
+                            onClick={() => openExistingChat(chat)}
+                            className="flex flex-col items-center gap-2 min-w-[72px] snap-start cursor-pointer group"
+                        >
+                            <div className="w-14 h-14 rounded-full p-[2px] bg-gradient-to-br from-brand-secondary to-transparent group-hover:from-white group-hover:to-zinc-500 transition-all relative">
+                                <img 
+                                    src={chat.otherUser.avatar_url} 
+                                    className="w-full h-full rounded-full object-cover bg-zinc-900 border-2 border-zinc-950" 
+                                    alt={chat.otherUser.name}
+                                />
+                                <div className="absolute bottom-0 right-0 w-4 h-4 bg-zinc-950 rounded-full flex items-center justify-center">
+                                    <div className="w-2.5 h-2.5 bg-green-500 rounded-full"></div>
+                                </div>
+                            </div>
+                            <span className="text-[10px] text-zinc-400 font-medium truncate w-full text-center group-hover:text-zinc-200">{chat.otherUser.name.split(' ')[0]}</span>
+                        </div>
+                    ))}
+                    <div className="min-w-[10px]"></div>
+                </div>
+            </section>
+        )}
+
+        {/* Active Chats */}
         <section className="px-6 pb-6">
             <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-zinc-200 tracking-tight flex items-center gap-2"><MessageCircle size={16} className="text-zinc-400" />Conversas</h2>
+                <h2 className="text-sm font-semibold text-zinc-200 tracking-tight flex items-center gap-2">
+                    <MessageCircle size={16} className="text-zinc-400" />
+                    Conversas Ativas
+                </h2>
             </div>
             <div className="flex flex-col gap-3">
-                 {chats.length === 0 ? (
-                     <div className="text-center py-8 opacity-50"><p className="text-xs text-zinc-500">Sem conversas ativas.</p></div>
+                 {activeChats.length === 0 ? (
+                     <div className="text-center py-12 border border-dashed border-zinc-800 rounded-2xl bg-zinc-900/20">
+                         <div className="w-12 h-12 bg-zinc-900 rounded-full flex items-center justify-center mx-auto mb-3 text-zinc-600">
+                             <Users size={20} />
+                         </div>
+                         <p className="text-xs text-zinc-500 mb-2">Sua lista de conversas está vazia.</p>
+                         <button onClick={() => setIsAddingFriend(true)} className="text-xs text-brand-primary font-bold hover:underline">
+                             Adicionar Amigos
+                         </button>
+                     </div>
                  ) : (
-                     chats.map(chat => (
+                     activeChats.map(chat => (
                         <div key={chat.chatId} onClick={() => openExistingChat(chat)} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4 active:scale-[0.98] transition-all cursor-pointer hover:border-zinc-700 group">
                             <div className="relative">
-                                {/* Tratamento visual para usuário excluído */}
+                                {/* Avatar & Status */}
                                 {chat.otherUser.is_deleted ? (
                                     <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700"><UserIcon size={20} className="text-zinc-600"/></div>
                                 ) : (
                                     <img src={chat.otherUser.avatar_url} className="w-12 h-12 rounded-full object-cover border border-zinc-800" />
                                 )}
-                                {chat.unreadCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-brand-primary rounded-full border-2 border-zinc-900"></span>}
                             </div>
+                            
                             <div className="flex-1 min-w-0">
                                 <div className="flex justify-between items-center mb-1">
                                     <h3 className={`text-sm font-semibold truncate ${chat.otherUser.is_deleted ? 'text-zinc-500 italic' : 'text-zinc-200'}`}>{chat.otherUser.name}</h3>
-                                    <span className="text-[10px] text-zinc-500 shrink-0">{new Date(chat.lastMessage.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <div className="flex flex-col items-end gap-1">
+                                        {chat.lastMessage && (
+                                            <span className={`text-[10px] font-medium shrink-0 ${chat.unreadCount > 0 ? 'text-brand-primary' : 'text-zinc-500'}`}>
+                                                {new Date(chat.lastMessage.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                            </span>
+                                        )}
+                                    </div>
                                 </div>
-                                <p className="text-xs text-zinc-400 truncate flex items-center gap-1 group-hover:text-zinc-300 transition-colors">{chat.lastMessage.sender_id === user?.id && <span className="text-zinc-500">Você: </span>}{chat.lastMessage.content}</p>
+                                
+                                <div className="flex justify-between items-center">
+                                    <p className={`text-xs truncate flex items-center gap-1 group-hover:text-zinc-300 transition-colors flex-1 ${chat.unreadCount > 0 ? 'text-zinc-100 font-medium' : 'text-zinc-400'}`}>
+                                        {chat.lastMessage ? (
+                                            <>
+                                                {chat.lastMessage.sender_id === user?.id && <span className="text-zinc-500 font-normal">Você: </span>}
+                                                {chat.lastMessage.type === 'image' ? (
+                                                    <span className="flex items-center gap-1 italic"><ImageIcon size={12}/> Foto</span>
+                                                ) : chat.lastMessage.type === 'location' ? (
+                                                     <span className="flex items-center gap-1 italic">📍 Localização</span>
+                                                ) : (
+                                                    chat.lastMessage.content
+                                                )}
+                                            </>
+                                        ) : (
+                                            <span className="text-zinc-500 italic">Toque para iniciar a conversa...</span>
+                                        )}
+                                    </p>
+                                    
+                                    {/* Unread Badge (WhatsApp Style) */}
+                                    {chat.unreadCount > 0 && (
+                                        <div className="ml-2 bg-brand-primary text-zinc-950 min-w-[20px] h-[20px] rounded-full flex items-center justify-center px-1">
+                                            <span className="text-[10px] font-bold leading-none">{chat.unreadCount}</span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <ArrowRight size={16} className="text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity -ml-2" />
                         </div>
                      ))
                  )}
