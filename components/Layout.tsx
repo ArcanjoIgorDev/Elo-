@@ -11,13 +11,13 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ children, activeScreen, onNavigate }) => {
   return (
     <div className="flex flex-col h-[100dvh] bg-zinc-950 text-zinc-100 overflow-hidden">
-      {/* Main Content Area - O scroll acontece AQUI, não nos filhos */}
-      <main className="flex-1 overflow-y-auto no-scrollbar relative w-full">
+      {/* Main Content Area - Scroll suave e padding safe area */}
+      <main className="flex-1 overflow-y-auto no-scrollbar relative w-full scroll-smooth pb-safe">
         {children}
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="h-20 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-900 pb-safe pt-2 px-6 flex justify-between items-center z-50 shrink-0">
+      <nav className="h-20 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-900 pb-safe pt-2 px-6 flex justify-between items-center z-50 shrink-0 absolute bottom-0 w-full">
         <NavButton 
           isActive={activeScreen === AppScreen.HOME} 
           onClick={() => onNavigate(AppScreen.HOME)}
@@ -52,7 +52,7 @@ const NavButton: React.FC<{
   return (
     <button 
       onClick={onClick}
-      className={`flex flex-col items-center justify-center w-16 transition-all duration-300 ${
+      className={`flex flex-col items-center justify-center w-16 h-full transition-all duration-300 active:scale-90 ${
         isActive ? 'text-zinc-100' : 'text-zinc-600'
       }`}
     >

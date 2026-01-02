@@ -57,15 +57,32 @@ export const toggleBlockUser = async (friendshipId: string, block: boolean, curr
     }
 };
 
+// --- FETCH PULSES (Com filtro de usuários deletados) ---
 export const fetchPulses = async (): Promise<Pulse[]> => {
   try {
-    const { data, error } = await supabase
+    // Busca pulsos
+    const { data: pulses, error } = await supabase
       .from('pulsos')
       .select('*')
       .order('created_at', { ascending: false });
       
     if (error) throw error;
-    return data as Pulse[] || [];
+    if (!pulses || pulses.length === 0) return [];
+
+    // Busca IDs de usuários que ainda existem na users_meta
+    const userIds = [...new Set(pulses.map(p => p.user_id))];
+    const { data: existingUsers } = await supabase
+        .from('users_meta')
+        .select('user_id')
+        .in('user_id', userIds);
+    
+    // Cria um Set para busca rápida O(1)
+    const validUserIds = new Set(existingUsers?.map(u => u.user_id));
+
+    // Filtra apenas posts de usuários que ainda existem
+    const validPulses = pulses.filter(p => validUserIds.has(p.user_id));
+
+    return validPulses as Pulse[];
   } catch (e: any) {
     console.error('Erro ao buscar vibes:', e.message);
     return [];
@@ -256,11 +273,22 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
         if (error) throw error;
         
         const results = await Promise.all(users.map(async (u: any) => {
-            const { data: friendship } = await supabase
+            // Consulta simplificada para evitar erros de sintaxe no .or complexo
+            const { data: friendshipA } = await supabase
                 .from('friendships')
                 .select('status, blocked_by, user_id, friend_id')
-                .or(`and(user_id.eq.${currentUserId},friend_id.eq.${u.user_id}),and(user_id.eq.${u.user_id},friend_id.eq.${currentUserId})`)
+                .eq('user_id', currentUserId)
+                .eq('friend_id', u.user_id)
                 .single();
+
+            const { data: friendshipB } = await supabase
+                .from('friendships')
+                .select('status, blocked_by, user_id, friend_id')
+                .eq('user_id', u.user_id)
+                .eq('friend_id', currentUserId)
+                .single();
+
+            const friendship = friendshipA || friendshipB;
 
             // Lógica de Status
             let status = null;
@@ -300,10 +328,13 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
 export const sendFriendRequest = async (currentUserId: string, targetUserId: string) => {
     try {
         // Verificar se já existe uma amizade ou pedido (mesmo que rejeitado)
-        const { data: existing, error: fetchError } = await supabase.from('friendships')
-            .select('*')
-            .or(`and(user_id.eq.${currentUserId},friend_id.eq.${targetUserId}),and(user_id.eq.${targetUserId},friend_id.eq.${currentUserId})`)
-            .single();
+        const { data: existingA } = await supabase.from('friendships')
+            .select('*').eq('user_id', currentUserId).eq('friend_id', targetUserId).single();
+            
+        const { data: existingB } = await supabase.from('friendships')
+            .select('*').eq('user_id', targetUserId).eq('friend_id', currentUserId).single();
+            
+        const existing = existingA || existingB;
 
         if (existing) {
             // Se foi rejeitada, atualiza para pending novamente
@@ -314,7 +345,8 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
                         status: 'pending', 
                         user_id: currentUserId, // Importante: quem pede agora é o currentUser
                         friend_id: targetUserId,
-                        blocked_by: null
+                        blocked_by: null,
+                        // Removed updated_at as it does not exist
                     })
                     .eq('id', existing.id);
                 if (error) throw error;
@@ -326,7 +358,12 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
         // Se não existe, cria nova
         const { error } = await supabase
             .from('friendships')
-            .insert([{ user_id: currentUserId, friend_id: targetUserId, status: 'pending' }]);
+            .insert([{ 
+                user_id: currentUserId, 
+                friend_id: targetUserId, 
+                status: 'pending',
+                created_at: new Date().toISOString()
+            }]);
         
         if(error) throw error;
         return true;
@@ -340,24 +377,41 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
 
 export const fetchNotifications = async (currentUserId: string): Promise<Notification[]> => {
     try {
-        // Buscar pedidos onde eu sou o amigo (friend_id) e status é pending (ALGUÉM ME PEDIU)
-        // OU onde eu sou o user (user_id) e status é accepted/rejected (ALGUÉM RESPONDEU MEU PEDIDO)
+        // Correção: Removido 'updated_at' da query pois a coluna não existe no banco.
         
-        const { data: requests, error } = await supabase
+        // Query 1: Pedidos que recebi (Eu sou friend_id e status é pending)
+        const { data: incoming, error: errorIncoming } = await supabase
             .from('friendships')
-            .select('id, user_id, friend_id, status, created_at, updated_at')
-            .or(`and(friend_id.eq.${currentUserId},status.eq.pending),and(user_id.eq.${currentUserId},status.in.(accepted,rejected))`)
-            .order('updated_at', { ascending: false });
+            .select('id, user_id, friend_id, status, created_at')
+            .eq('friend_id', currentUserId)
+            .eq('status', 'pending');
 
-        if (error) throw error;
-        if (!requests || requests.length === 0) return [];
+        if (errorIncoming) throw errorIncoming;
+
+        // Query 2: Respostas aos meus pedidos (Eu sou user_id e status é accepted/rejected)
+        const { data: updates, error: errorUpdates } = await supabase
+            .from('friendships')
+            .select('id, user_id, friend_id, status, created_at')
+            .eq('user_id', currentUserId)
+            .in('status', ['accepted', 'rejected']);
+
+        if (errorUpdates) throw errorUpdates;
+
+        // Mesclar
+        const requests = [...(incoming || []), ...(updates || [])];
+
+        // Ordenar por created_at (melhor aproximação disponível)
+        requests.sort((a, b) => {
+            const dateA = new Date(a.created_at).getTime();
+            const dateB = new Date(b.created_at).getTime();
+            return dateB - dateA;
+        });
 
         const notifications: Notification[] = [];
 
         for (const req of requests) {
             // Determinar o "outro" usuário
             const isIncomingRequest = req.friend_id === currentUserId && req.status === 'pending';
-            const isStatusUpdate = req.user_id === currentUserId && (req.status === 'accepted' || req.status === 'rejected');
             
             const otherUserId = isIncomingRequest ? req.user_id : req.friend_id;
 
@@ -386,30 +440,26 @@ export const fetchNotifications = async (currentUserId: string): Promise<Notific
                         avatar_url: u.avatar_url,
                         email: ''
                     },
-                    timestamp: req.updated_at || req.created_at,
-                    read: false // Idealmente salvaríamos isso no banco, mas por simplicidade assumimos false
+                    timestamp: req.created_at,
+                    read: false 
                 });
             }
         }
 
         return notifications;
-    } catch (e) {
-        console.error("Erro ao buscar notificações", e);
+    } catch (e: any) {
+        console.error("Erro ao buscar notificações", JSON.stringify(e));
         return [];
     }
 };
 
-// Limpa notificações que são apenas informativas (Aceito/Recusado)
-// Para 'rejected', podemos deletar a row ou mudar status para 'deleted_notification' se tivéssemos essa coluna.
-// Como não temos, vamos DELETAR o registro de amizade se for 'rejected' e o usuário dispensar.
-// Se for 'accepted', apenas removemos da UI localmente (o status continua accepted no banco para manter a amizade).
 export const clearNotification = async (notificationId: string, type: string) => {
     try {
         if (type === 'REQUEST_REJECTED') {
             // Se foi rejeitado e o usuário viu, podemos limpar do banco para ele poder pedir de novo no futuro
             await supabase.from('friendships').delete().eq('id', notificationId);
         }
-        // Se for accepted, não fazemos nada no banco, a UI filtra (ou precisaríamos de uma tabela de notificações real)
+        // Se for accepted, a UI filtra localmente até expirar o tempo (3 dias) ou o usuário pode dispensar na sessão (UI state)
         return true;
     } catch (e) {
         return false;
@@ -417,7 +467,7 @@ export const clearNotification = async (notificationId: string, type: string) =>
 }
 
 export const fetchPendingRequests = async (currentUserId: string) => {
-    // Mantido para compatibilidade, mas agora usamos fetchNotifications
+    // Mantido para compatibilidade
     const notifs = await fetchNotifications(currentUserId);
     return notifs.filter(n => n.type === 'FRIEND_REQUEST').map(n => ({
         requestId: n.id,
@@ -427,22 +477,16 @@ export const fetchPendingRequests = async (currentUserId: string) => {
 
 export const respondToFriendRequest = async (requestId: string, accept: boolean) => {
     try {
+        // Correção: Removido 'updated_at' do update payload
         if (accept) {
             await supabase
                 .from('friendships')
-                .update({ 
-                    status: 'accepted',
-                    updated_at: new Date().toISOString()
-                })
+                .update({ status: 'accepted' })
                 .eq('id', requestId);
         } else {
-            // NÃO DELETAR. Marcar como rejeitado para o remetente ser notificado.
             await supabase
                 .from('friendships')
-                .update({ 
-                    status: 'rejected',
-                    updated_at: new Date().toISOString()
-                })
+                .update({ status: 'rejected' })
                 .eq('id', requestId);
         }
         return true;
@@ -452,23 +496,39 @@ export const respondToFriendRequest = async (requestId: string, accept: boolean)
     }
 };
 
+// --- GET USER PROFILE (Correção de Bug) ---
 export const getUserProfile = async (userId: string, currentUserId: string): Promise<{user: User, friendship: any} | null> => {
     try {
-        // Busca Perfil
+        // 1. Busca Perfil (Independente de amizade)
         const { data: userData, error: userError } = await supabase
             .from('users_meta')
             .select('*')
             .eq('user_id', userId)
             .single();
         
-        if (userError) throw userError;
+        if (userError || !userData) {
+            console.log("Usuário não encontrado:", userId);
+            return null;
+        }
 
-        // Busca Status Amizade
-        const { data: friendship } = await supabase
+        // 2. Busca Status Amizade (Pode não existir, não deve quebrar a função)
+        let friendship = null;
+        
+        const { data: friendshipA } = await supabase
             .from('friendships')
             .select('*')
-            .or(`and(user_id.eq.${currentUserId},friend_id.eq.${userId}),and(user_id.eq.${userId},friend_id.eq.${currentUserId})`)
+            .eq('user_id', currentUserId)
+            .eq('friend_id', userId)
             .single();
+
+        const { data: friendshipB } = await supabase
+            .from('friendships')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('friend_id', currentUserId)
+            .single();
+
+        friendship = friendshipA || friendshipB;
 
         return {
             user: {
@@ -479,9 +539,10 @@ export const getUserProfile = async (userId: string, currentUserId: string): Pro
                 avatar_url: userData.avatar_url,
                 bio: userData.bio
             },
-            friendship
+            friendship: friendship
         };
     } catch (e) {
+        console.error("Erro no getUserProfile", e);
         return null;
     }
 };

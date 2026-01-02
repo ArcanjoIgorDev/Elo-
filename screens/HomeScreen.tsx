@@ -247,7 +247,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
 
       {/* --- NOTIFICATIONS MODAL --- */}
       {isNotificationsOpen && (
-          <div className="absolute inset-0 z-50 bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
+          <div className="fixed inset-0 z-[60] bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
              <div className="flex justify-between items-center mb-6">
                  <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
                      <Bell size={20} className="text-brand-primary" /> Notificações
@@ -296,16 +296,17 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
           </div>
       )}
 
-      {/* --- CREATE VIBE MODAL --- */}
+      {/* --- CREATE VIBE MODAL (FIXED) --- */}
       {isCreatingPulse && (
-          <div className="absolute inset-0 z-50 bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
-             <div className="flex justify-between items-center mb-6">
+          <div className="fixed inset-0 z-[60] bg-zinc-950/95 backdrop-blur-md flex flex-col p-6 animate-fade-in">
+             <div className="flex justify-between items-center mb-6 shrink-0">
                  <h2 className="text-lg font-bold text-zinc-100">Nova Vibe</h2>
                  <button onClick={() => setIsCreatingPulse(false)} className="p-2 bg-zinc-900 rounded-full text-zinc-400">
                      <X size={20} />
                  </button>
              </div>
-             <div className="flex-1 flex flex-col gap-4">
+             
+             <div className="flex-1 flex flex-col gap-4 overflow-y-auto">
                  {pulseImage ? (
                      <div className="flex flex-col h-full">
                          <div className="relative w-full h-64 rounded-2xl overflow-hidden group shrink-0 mb-4 bg-zinc-900">
@@ -333,7 +334,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                     />
                  )}
              </div>
-             <div className="space-y-4">
+             
+             <div className="space-y-4 shrink-0 mt-4">
                  <div>
                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Mood</p>
                      <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
@@ -345,7 +347,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                  <div className="flex justify-between items-center pt-4 border-t border-zinc-900">
                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect}/>
                      <button onClick={() => fileInputRef.current?.click()} className="p-3 bg-zinc-900 rounded-full text-zinc-400 hover:text-zinc-100"><ImageIcon size={20} /></button>
-                     <button disabled={sendingPulse || (!newPulseContent.trim() && !pulseImage)} onClick={handleCreatePulse} className="bg-brand-primary text-zinc-950 font-bold px-6 py-3 rounded-full flex items-center gap-2 disabled:opacity-50 hover:scale-105 transition-transform">{sendingPulse ? 'Enviando...' : 'Publicar'}<Send size={18} /></button>
+                     <button 
+                        disabled={sendingPulse || (!newPulseContent.trim() && !pulseImage)} 
+                        onClick={handleCreatePulse} 
+                        className="bg-brand-primary text-zinc-950 font-bold px-6 py-3 rounded-full flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 transition-transform"
+                     >
+                         {sendingPulse ? 'Enviando...' : 'Publicar'}
+                         <Send size={18} />
+                     </button>
                  </div>
              </div>
           </div>
@@ -353,7 +362,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
 
       {/* --- BUSCA DE USUÁRIOS MODAL --- */}
       {isAddingFriend && (
-          <div className="absolute inset-0 z-50 bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
+          <div className="fixed inset-0 z-[60] bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
              <div className="flex justify-between items-center mb-6">
                  <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
                      <UserPlus size={20} className="text-brand-secondary" /> Nova Conexão
@@ -450,7 +459,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                 </h2>
             </div>
             
-            <div className="flex overflow-x-auto no-scrollbar pb-4 snap-x snap-mandatory px-6 gap-3">
+            <div className="flex overflow-x-auto no-scrollbar pb-4 snap-x snap-mandatory px-6 gap-4 scroll-pl-6 scroll-smooth">
                 <div 
                     onClick={() => setIsCreatingPulse(true)}
                     className="min-w-[130px] w-[130px] h-[240px] border border-dashed border-zinc-800 bg-zinc-900/20 hover:border-zinc-600 transition-all rounded-3xl flex flex-col items-center justify-center shrink-0 cursor-pointer snap-start active:scale-95 touch-manipulation"

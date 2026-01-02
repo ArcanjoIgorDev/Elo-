@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { User, Pulse } from '../types';
 import { fetchPulses, getUserProfile, deletePulse, deleteMyAccount, toggleBlockUser, sendFriendRequest } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
-import { ArrowLeft, LogOut, Zap, Trash2, Ban, ShieldAlert, Snowflake, UserPlus, Check, MessageCircle } from 'lucide-react';
+import { ArrowLeft, LogOut, Zap, Trash2, Ban, ShieldAlert, Snowflake, UserPlus, Check, MessageCircle, X } from 'lucide-react';
 
 interface ProfileScreenProps {
   targetUserId?: string; // If null, shows own profile
@@ -44,9 +44,12 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
                 } else {
                     setFriendshipStatus(null);
                 }
+            } else {
+                setProfileUser(null);
             }
         }
 
+        // Carrega pulsos (já filtrados na API, mas filtramos aqui por usuário específico)
         const allPulses = await fetchPulses();
         const myPulses = allPulses.filter(p => p.user_id === uid);
         setUserPulses(myPulses);
@@ -90,10 +93,22 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
       return <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-zinc-100 border-t-transparent rounded-full animate-spin"></div></div>;
   }
 
-  if (!profileUser) return <div className="p-10 text-center text-zinc-500">Usuário não encontrado.</div>;
+  // Tratamento de erro ou usuário não encontrado
+  if (!profileUser) {
+      return (
+        <div className="flex flex-col items-center justify-center h-full bg-zinc-950 p-6 text-center">
+            <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4">
+                <Ban size={32} className="text-zinc-600"/>
+            </div>
+            <h2 className="text-xl font-bold text-zinc-300 mb-2">Usuário não encontrado</h2>
+            <p className="text-sm text-zinc-500 mb-6">Esta conta pode ter sido excluída ou nunca existiu.</p>
+            <button onClick={onBack} className="bg-zinc-100 text-zinc-950 px-6 py-3 rounded-full font-bold">Voltar</button>
+        </div>
+      );
+  }
 
   return (
-    <div className={`min-h-full bg-zinc-950 pb-20 relative transition-all duration-700 ${isBlocked ? 'grayscale blur-[1px]' : ''}`}>
+    <div className={`min-h-full bg-zinc-950 pb-32 relative transition-all duration-700 ${isBlocked ? 'grayscale blur-[1px]' : ''}`}>
         
         {/* Efeito de Gelo Inovador se Bloqueado */}
         {isBlocked && (
@@ -127,27 +142,33 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
             </div>
         )}
 
-        {/* Banner */}
-        <div className="h-32 w-full bg-gradient-to-b from-zinc-800 to-zinc-950 relative">
-             <div className="absolute top-4 left-4 z-10">
-                {!isOwnProfile && (
-                    <button onClick={onBack} className="p-2 bg-black/40 backdrop-blur-md rounded-full text-white hover:bg-black/60 transition-colors">
-                        <ArrowLeft size={20} />
-                    </button>
-                )}
+        {/* Botão de Voltar Flutuante e Fixo (Mobile Experience) */}
+        {!isOwnProfile && (
+            <div className="fixed top-4 left-4 z-50">
+                <button 
+                    onClick={onBack} 
+                    className="w-10 h-10 flex items-center justify-center bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-black/80 transition-all border border-white/10 shadow-lg"
+                >
+                    <ArrowLeft size={20} />
+                </button>
             </div>
-            {isOwnProfile && (
-                <div className="absolute top-4 right-4 z-10">
-                    <button onClick={onSignOut} className="p-2 bg-black/40 backdrop-blur-md rounded-full text-zinc-400 hover:text-white hover:bg-black/60 transition-colors">
-                        <LogOut size={18} />
-                    </button>
-                </div>
-            )}
-        </div>
+        )}
+
+        {/* Botão Logout (Se for próprio perfil) */}
+        {isOwnProfile && (
+             <div className="fixed top-4 right-4 z-50">
+                <button onClick={onSignOut} className="w-10 h-10 flex items-center justify-center bg-black/60 backdrop-blur-md rounded-full text-zinc-400 hover:text-white hover:bg-black/80 transition-all border border-white/10">
+                    <LogOut size={18} />
+                </button>
+            </div>
+        )}
+
+        {/* Banner */}
+        <div className="h-40 w-full bg-gradient-to-b from-zinc-800 to-zinc-950 relative"></div>
 
         {/* Informações do Perfil */}
-        <div className="px-6 flex flex-col items-start -mt-12 mb-6 relative z-10">
-            <div className="w-24 h-24 rounded-full border-4 border-zinc-950 bg-zinc-900 overflow-hidden shadow-lg mb-4">
+        <div className="px-6 flex flex-col items-start -mt-16 mb-6 relative z-10">
+            <div className="w-28 h-28 rounded-full border-[5px] border-zinc-950 bg-zinc-900 overflow-hidden shadow-2xl mb-4">
                 <img 
                     src={profileUser.avatar_url || `https://ui-avatars.com/api/?name=${profileUser.name}&background=random`} 
                     alt="Profile" 
@@ -163,7 +184,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
                 
                 {/* Ações para Outros Usuários */}
                 {!isOwnProfile && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 mt-2">
                         {/* Botão de Amizade */}
                         {!isBlocked && (
                             <>
@@ -176,7 +197,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
                                         Mensagem
                                     </button>
                                 ) : friendshipStatus === 'pending' ? (
-                                    <button className="bg-zinc-800 text-zinc-400 px-4 py-2 rounded-full font-medium text-xs flex items-center gap-2 cursor-default">
+                                    <button className="bg-zinc-800 text-zinc-400 px-4 py-2 rounded-full font-medium text-xs flex items-center gap-2 cursor-default border border-zinc-700">
                                         <Check size={16} />
                                         Pendente
                                     </button>
@@ -267,9 +288,9 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
                                             if(ok) removePulseFromList(pulse.id);
                                         }
                                     }}
-                                    className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm p-1.5 rounded-full text-white/50 hover:text-red-400 hover:bg-black/60 opacity-0 group-hover:opacity-100 transition-all"
+                                    className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm p-2 rounded-full text-white/70 hover:text-red-400 hover:bg-black/80 transition-all"
                                  >
-                                     <LogOut size={12} /> 
+                                     <Trash2 size={12} /> 
                                  </button>
                              )}
                          </div>

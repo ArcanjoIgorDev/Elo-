@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Pulse, ReactionType } from '../types';
-import { Eye, Clock, Trash2, User as UserIcon, Heart, Flame } from 'lucide-react';
+import { Clock, Trash2, Heart, Flame } from 'lucide-react';
 import { deletePulse, getPulseReactions, togglePulseReaction } from '../services/dataService';
 
 interface PulseCardProps {
@@ -69,7 +69,7 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
   return (
     <div 
         onClick={handleCardClick}
-        className="min-w-[150px] w-[150px] h-[240px] bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden shrink-0 snap-start mr-3 relative group transition-all duration-300 active:scale-95 cursor-pointer touch-manipulation"
+        className="min-w-[150px] w-[150px] h-[240px] bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden shrink-0 snap-start relative group transition-all duration-300 active:scale-[0.98] cursor-pointer touch-manipulation shadow-md"
     >
       
       {/* Background Logic */}
@@ -80,37 +80,27 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
             alt="Pulso" 
             className="absolute inset-0 w-full h-full object-cover transition-transform duration-700"
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/90"></div>
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/90"></div>
         </>
       ) : (
-        <div className="absolute inset-0 bg-zinc-900 p-4 pb-12 flex flex-col items-center justify-center bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-zinc-800 via-zinc-900 to-zinc-950">
+        <div className="absolute inset-0 bg-zinc-900 p-4 pb-14 flex flex-col items-center justify-center bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-zinc-800 via-zinc-900 to-zinc-950">
              <p className="text-zinc-300 text-xs font-serif italic text-center leading-relaxed line-clamp-6 opacity-90 select-none">
                  "{pulse.content}"
              </p>
         </div>
       )}
 
-      {/* Delete Button (Owner Only) */}
-      {isOwner && (
-          <button 
-            onClick={handleDelete}
-            className="absolute top-2 right-2 z-20 p-2 bg-black/40 backdrop-blur-md rounded-full text-zinc-400 hover:text-red-400 hover:bg-black/60 transition-all"
-          >
-              <Trash2 size={14} />
-          </button>
-      )}
-
-      {/* Header Info */}
-      <div className="absolute top-0 left-0 w-full p-3 pointer-events-none z-10">
-          <div className="flex justify-between items-start">
-             <div className="w-8 h-8 rounded-full border border-white/10 p-[2px] backdrop-blur-md bg-black/20 overflow-hidden">
+      {/* Header Info (Top Left) */}
+      <div className="absolute top-0 left-0 w-full p-3 pointer-events-none z-10 flex justify-between items-start">
+          <div className="flex justify-between items-start w-full">
+             <div className="w-9 h-9 rounded-full border border-white/10 p-[2px] backdrop-blur-md bg-black/20 overflow-hidden shadow-sm">
                 <img 
                     src={pulse.user_avatar || `https://ui-avatars.com/api/?name=${pulse.user_name}&background=random`} 
                     className="w-full h-full rounded-full object-cover" 
                     alt="User" 
                 />
              </div>
-             <div className="bg-black/40 backdrop-blur-md px-2 py-1 rounded-full flex items-center gap-1">
+             <div className="bg-black/40 backdrop-blur-md px-2 py-1 rounded-full flex items-center gap-1 border border-white/5">
                 <Clock size={10} className="text-zinc-400" />
                 <span className="text-[9px] text-zinc-300 font-medium">{timeString}</span>
              </div>
@@ -118,11 +108,11 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
       </div>
 
       {/* Content Bottom Layer */}
-      <div className="absolute bottom-0 w-full p-3 flex flex-col justify-end pointer-events-none">
+      <div className="absolute bottom-0 w-full p-3 flex flex-col justify-end z-20">
           
           {/* User Info & Desc */}
-          <div className="space-y-1 mb-2">
-             <p className="text-[12px] font-bold text-white truncate drop-shadow-md tracking-wide">
+          <div className="space-y-1 mb-8 pointer-events-none">
+             <p className="text-[12px] font-bold text-white truncate drop-shadow-md tracking-wide pr-8">
                  {pulse.user_name || 'Usuário'}
              </p>
              {pulse.content_type === 'image' && pulse.description && (
@@ -132,27 +122,40 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
              )}
           </div>
 
-          {/* REACTION BAR */}
-          <div className="flex items-center gap-2 pointer-events-auto">
-              <button 
-                onClick={(e) => handleReaction(e, 'heart')}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded-full backdrop-blur-md transition-all ${
-                    myReaction === 'heart' ? 'bg-pink-500/20 text-pink-500 border border-pink-500/30' : 'bg-black/40 text-zinc-400 border border-white/5 hover:bg-black/60'
-                }`}
-              >
-                  <Heart size={12} className={myReaction === 'heart' ? 'fill-current' : ''} />
-                  {reactions.heart > 0 && <span className="text-[9px] font-bold">{reactions.heart}</span>}
-              </button>
+          {/* Action Bar (Reactions Left, Delete Right) */}
+          <div className="flex items-center justify-between w-full absolute bottom-3 left-0 px-3">
+              {/* Reactions */}
+              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                  <button 
+                    onClick={(e) => handleReaction(e, 'heart')}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-full backdrop-blur-md transition-all ${
+                        myReaction === 'heart' ? 'bg-pink-500/20 text-pink-500 border border-pink-500/30' : 'bg-black/60 text-zinc-400 border border-white/5 hover:bg-black/80'
+                    }`}
+                  >
+                      <Heart size={12} className={myReaction === 'heart' ? 'fill-current' : ''} />
+                      {reactions.heart > 0 && <span className="text-[9px] font-bold">{reactions.heart}</span>}
+                  </button>
 
-              <button 
-                onClick={(e) => handleReaction(e, 'fire')}
-                className={`flex items-center gap-1 px-2 py-1.5 rounded-full backdrop-blur-md transition-all ${
-                    myReaction === 'fire' ? 'bg-orange-500/20 text-orange-500 border border-orange-500/30' : 'bg-black/40 text-zinc-400 border border-white/5 hover:bg-black/60'
-                }`}
-              >
-                  <Flame size={12} className={myReaction === 'fire' ? 'fill-current' : ''} />
-                  {reactions.fire > 0 && <span className="text-[9px] font-bold">{reactions.fire}</span>}
-              </button>
+                  <button 
+                    onClick={(e) => handleReaction(e, 'fire')}
+                    className={`flex items-center gap-1 px-2 py-1.5 rounded-full backdrop-blur-md transition-all ${
+                        myReaction === 'fire' ? 'bg-orange-500/20 text-orange-500 border border-orange-500/30' : 'bg-black/60 text-zinc-400 border border-white/5 hover:bg-black/80'
+                    }`}
+                  >
+                      <Flame size={12} className={myReaction === 'fire' ? 'fill-current' : ''} />
+                      {reactions.fire > 0 && <span className="text-[9px] font-bold">{reactions.fire}</span>}
+                  </button>
+              </div>
+
+              {/* Delete Button (Moved to Bottom Right) */}
+              {isOwner && (
+                  <button 
+                    onClick={handleDelete}
+                    className="w-7 h-7 flex items-center justify-center bg-black/60 backdrop-blur-md rounded-full text-zinc-400 hover:text-red-400 hover:bg-black/80 transition-all border border-white/5"
+                  >
+                      <Trash2 size={12} />
+                  </button>
+              )}
           </div>
       </div>
     </div>
