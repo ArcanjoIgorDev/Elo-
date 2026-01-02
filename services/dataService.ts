@@ -1,4 +1,5 @@
-import { Pulse, Message, EcoData, SearchResult, ChatSummary, User, EmotionalState, Topic, ReactionType, PulseReactionCounts, Notification, MessageType } from '../types';
+
+import { Pulse, Message, EcoData, SearchResult, ChatSummary, User, EmotionalState, Topic, ReactionType, PulseReactionCounts, Notification, MessageType, ActivityPoint } from '../types';
 import { supabase } from '../lib/supabaseClient';
 
 // --- HELPER: Gera ID único para conversa entre dois usuários ---
@@ -8,6 +9,82 @@ export const getChatId = (userA: string, userB: string) => {
 };
 
 // --- SERVICES ---
+
+// Calcula a Ressonância Real (Atividade nos últimos 7 dias)
+export const fetchUserResonance = async (userId: string): Promise<ActivityPoint[]> => {
+    try {
+        const today = new Date();
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(today.getDate() - 6);
+        const isoDate = sevenDaysAgo.toISOString();
+
+        // 1. Buscar mensagens enviadas pelo usuário
+        const { data: messages, error: msgError } = await supabase
+            .from('messages')
+            .select('created_at')
+            .eq('sender_id', userId)
+            .gte('created_at', isoDate);
+
+        // 2. Buscar vibes (pulses) criadas pelo usuário
+        const { data: pulses, error: pulseError } = await supabase
+            .from('pulsos')
+            .select('created_at')
+            .eq('user_id', userId)
+            .gte('created_at', isoDate);
+
+        if (msgError || pulseError) return [];
+
+        // 3. Processar e Agrupar por dia
+        const activityMap = new Map<string, { messages: number, pulses: number }>();
+        
+        // Inicializa os últimos 7 dias com 0
+        for (let i = 0; i < 7; i++) {
+            const d = new Date();
+            d.setDate(today.getDate() - i);
+            const key = d.toISOString().split('T')[0];
+            activityMap.set(key, { messages: 0, pulses: 0 });
+        }
+
+        messages?.forEach((m: any) => {
+            const key = m.created_at.split('T')[0];
+            if (activityMap.has(key)) {
+                const current = activityMap.get(key)!;
+                current.messages++;
+            }
+        });
+
+        pulses?.forEach((p: any) => {
+            const key = p.created_at.split('T')[0];
+            if (activityMap.has(key)) {
+                const current = activityMap.get(key)!;
+                current.pulses++;
+            }
+        });
+
+        // 4. Converter para Array ordenado (Recharts friendly)
+        const result: ActivityPoint[] = Array.from(activityMap.entries())
+            .map(([date, counts]) => {
+                const dateObj = new Date(date);
+                // Adiciona fuso horário para exibir corretamente o dia da semana
+                const userTimezoneOffset = dateObj.getTimezoneOffset() * 60000;
+                const localDate = new Date(dateObj.getTime() + userTimezoneOffset);
+                
+                return {
+                    date,
+                    fullDate: localDate.toLocaleDateString('pt-BR', { weekday: 'short' }).toUpperCase(),
+                    messages: counts.messages,
+                    pulses: counts.pulses,
+                    total: counts.messages + (counts.pulses * 5) // Peso maior para Vibes
+                };
+            })
+            .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        return result;
+    } catch (e) {
+        console.error("Erro ao calcular ressonância:", e);
+        return [];
+    }
+};
 
 export const fetchDailyTopic = async (): Promise<Topic> => {
     const defaultTopic = { id: 'default', title: 'O que te fez sorrir hoje?' };

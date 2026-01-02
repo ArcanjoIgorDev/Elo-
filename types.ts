@@ -1,3 +1,4 @@
+
 export interface User {
   id: string;
   email: string;
@@ -57,6 +58,14 @@ export interface Metric {
   delta?: number;
 }
 
+export interface ActivityPoint {
+    date: string; // YYYY-MM-DD
+    fullDate: string; // Display
+    messages: number;
+    pulses: number;
+    total: number;
+}
+
 export interface EcoData {
   pulseViews: { date: string; views: number }[];
   totalMarks: number;
@@ -100,5 +109,6 @@ export enum AppScreen {
   CHAT = 'CHAT',
   ECO = 'ECO',
   PROFILE = 'PROFILE',
-  USER_PROFILE = 'USER_PROFILE'
+  USER_PROFILE = 'USER_PROFILE',
+  SETTINGS = 'SETTINGS'
 }

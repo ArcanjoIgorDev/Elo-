@@ -1,33 +1,35 @@
+
 import React, { useEffect, useState, useRef } from 'react';
-import { User, Pulse, ChatSummary } from '../types';
-import { fetchPulses, getUserProfile, deletePulse, deleteMyAccount, toggleBlockUser, sendFriendRequest, removeFriend, updateUserProfileMeta, getFriendsCount, fetchUserChats, getChatId } from '../services/dataService';
+import { User, Pulse, ActivityPoint } from '../types';
+import { fetchPulses, getUserProfile, deleteMyAccount, toggleBlockUser, sendFriendRequest, updateUserProfileMeta, getFriendsCount, fetchUserChats, getChatId, fetchUserResonance } from '../services/dataService';
 import { useAuth } from '../context/AuthContext';
-import { ArrowLeft, LogOut, Zap, Trash2, Ban, ShieldAlert, Snowflake, UserPlus, Check, MessageCircle, X, UserMinus, Edit2, Camera, Upload, Save, Palette, Reply, Users, Calendar, Activity, BarChart3, Radio } from 'lucide-react';
+import { ArrowLeft, Zap, ShieldAlert, UserPlus, Check, MessageCircle, Edit2, Camera, Upload, Save, Settings, Users, Activity } from 'lucide-react';
+import { AreaChart, Area, Tooltip, ResponsiveContainer, CartesianGrid, XAxis } from 'recharts';
 
 interface ProfileScreenProps {
   targetUserId?: string; // If null, shows own profile
   onBack: () => void;
-  onSignOut: () => void;
+  onSettings: () => void; // Link to Settings
   onStartChat?: (user: User, initialContext?: string) => void;
 }
 
-const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onSignOut, onStartChat }) => {
-  const { user, signOut, updateUser } = useAuth();
+const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onSettings, onStartChat }) => {
+  const { user, updateUser } = useAuth();
   const [profileUser, setProfileUser] = useState<User | null>(null);
   const [userPulses, setUserPulses] = useState<Pulse[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Stats
+  // Stats & Chart Data
   const [friendsCount, setFriendsCount] = useState(0);
-  const [resonanceScore, setResonanceScore] = useState(0); // Função única "Ressonância"
+  const [resonanceScore, setResonanceScore] = useState(0); 
+  const [activityData, setActivityData] = useState<ActivityPoint[]>([]);
   
-  // States para ações
+  // Actions
   const [isBlocked, setIsBlocked] = useState(false);
   const [friendshipStatus, setFriendshipStatus] = useState<string | null>(null);
   const [friendshipId, setFriendshipId] = useState<string | null>(null);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // States de Edição
+  // Edit Mode
   const [isEditing, setIsEditing] = useState(false);
   const [editBio, setEditBio] = useState('');
   const [editAvatar, setEditAvatar] = useState('');
@@ -39,12 +41,8 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
   const PRESET_AVATARS = [
       'https://ui-avatars.com/api/?background=10b981&color=fff&name=',
       'https://ui-avatars.com/api/?background=6366f1&color=fff&name=',
-      'https://ui-avatars.com/api/?background=f43f5e&color=fff&name=',
-      'https://ui-avatars.com/api/?background=f59e0b&color=fff&name=',
       'https://ui-avatars.com/api/?background=18181b&color=fff&name=',
       'https://api.dicebear.com/7.x/notionists/svg?seed=',
-      'https://api.dicebear.com/7.x/micah/svg?seed=',
-      'https://api.dicebear.com/7.x/bottts/svg?seed=',
   ];
 
   useEffect(() => {
@@ -79,22 +77,18 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
         const myPulses = allPulses.filter(p => p.user_id === uid);
         setUserPulses(myPulses);
 
-        // 3. Stats Extras (Inovação)
+        // 3. Stats & Chart Real Data
         const count = await getFriendsCount(uid);
         setFriendsCount(count);
 
+        // Fetch Real Resonance Data
+        const realActivity = await fetchUserResonance(uid);
+        setActivityData(realActivity);
+
         if (!isOwnProfile && user) {
-            // Calcular "Ressonância" (Compatibilidade simulada baseada em interações)
-            // Na vida real isso analisaria mensagens trocadas, likes, etc.
             const chats = await fetchUserChats(user.id);
             const commonChat = chats.find(c => c.otherUser.id === uid);
-            if (commonChat) {
-                // Score baseado em mensagens + vibe check (simulado por hash do ID pra ser consistente)
-                const pseudoRandom = (uid.charCodeAt(0) + user.id.charCodeAt(0)) % 40; 
-                setResonanceScore(60 + pseudoRandom); // Entre 60 e 100
-            } else {
-                setResonanceScore(0);
-            }
+            setResonanceScore(commonChat ? 85 : 0);
         }
 
         setLoading(false);
@@ -102,44 +96,10 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
     loadProfile();
   }, [targetUserId, user]);
 
-  const removePulseFromList = (pulseId: string) => {
-      setUserPulses(prev => prev.filter(p => p.id !== pulseId));
-  };
-
-  const handleDeleteAccount = async () => {
-      setLoading(true);
-      const success = await deleteMyAccount();
-      if(success) {
-          await signOut();
-          alert("Sua conta foi excluída e seus dados removidos.");
-      } else {
-          setLoading(false);
-          alert("Erro ao excluir conta. Tente novamente.");
-      }
-  };
-
-  const handleBlockToggle = async () => {
-      if(!friendshipId || !user) return;
-      const newStatus = !isBlocked;
-      setIsBlocked(newStatus); 
-      const success = await toggleBlockUser(friendshipId, newStatus, user.id);
-      if(!success) setIsBlocked(!newStatus);
-  };
-
   const handleConnect = async () => {
       if(user && profileUser && !friendshipStatus) {
           const success = await sendFriendRequest(user.id, profileUser.id);
           if (success) setFriendshipStatus('pending');
-      }
-  };
-
-  const handleRemoveFriend = async () => {
-      if (friendshipId && window.confirm(`Deseja desfazer a amizade com ${profileUser?.name}?`)) {
-          const success = await removeFriend(friendshipId);
-          if (success) {
-              setFriendshipStatus(null);
-              setFriendshipId(null);
-          }
       }
   };
 
@@ -166,13 +126,11 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
 
   const handleSaveProfile = async () => {
       if(!user) return;
-      
       setLoading(true);
       const success = await updateUserProfileMeta(user.id, {
           bio: editBio,
           avatar_url: editAvatar
       });
-
       if (success) {
           updateUser({ bio: editBio, avatar_url: editAvatar });
           setProfileUser(prev => prev ? {...prev, bio: editBio, avatar_url: editAvatar} : null);
@@ -185,68 +143,14 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
       return <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-zinc-100 border-t-transparent rounded-full animate-spin"></div></div>;
   }
 
-  if (!profileUser) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full bg-zinc-950 p-6 text-center">
-            <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4">
-                <Ban size={32} className="text-zinc-600"/>
-            </div>
-            <h2 className="text-xl font-bold text-zinc-300 mb-2">Usuário não encontrado</h2>
-            <button onClick={onBack} className="bg-zinc-100 text-zinc-950 px-6 py-3 rounded-full font-bold">Voltar</button>
-        </div>
-      );
-  }
-
-  // --- COMPONENTES VISUAIS ---
-
-  const StatCard = ({ icon, value, label, highlight = false }: any) => (
-      <div className={`flex flex-col items-center justify-center p-3 rounded-2xl border ${highlight ? 'bg-zinc-900 border-zinc-700' : 'bg-zinc-900/50 border-zinc-800'}`}>
-          <div className={`mb-1 ${highlight ? 'text-brand-primary' : 'text-zinc-400'}`}>{icon}</div>
-          <span className={`text-lg font-bold ${highlight ? 'text-zinc-100' : 'text-zinc-300'}`}>{value}</span>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wide">{label}</span>
-      </div>
-  );
+  if (!profileUser) return null;
 
   return (
-    <div className={`min-h-full bg-zinc-950 pb-32 relative transition-all duration-700 ${isBlocked ? 'grayscale blur-[1px]' : ''}`}>
+    <div className={`min-h-full bg-zinc-950 pb-32 relative transition-all duration-700 ${isBlocked ? 'grayscale' : ''}`}>
         
-        {/* Blocked Overlay */}
-        {isBlocked && (
-            <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
-                <div className="bg-zinc-950/80 p-6 rounded-3xl border border-blue-500/30 backdrop-blur-md flex flex-col items-center animate-in zoom-in duration-300">
-                    <Snowflake size={40} className="text-blue-400 mb-2 animate-pulse" />
-                    <p className="text-blue-200 font-bold tracking-widest text-sm">CONEXÃO CONGELADA</p>
-                </div>
-            </div>
-        )}
-
-        {/* Modal de Exclusão */}
-        {showDeleteConfirm && (
-            <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-6 animate-fade-in backdrop-blur-sm">
-                <div className="bg-zinc-900 border border-red-900/50 p-6 rounded-3xl max-w-sm w-full shadow-2xl shadow-red-900/20">
-                    <div className="w-12 h-12 bg-red-900/20 rounded-full flex items-center justify-center mb-4 mx-auto">
-                        <ShieldAlert className="text-red-500" size={24} />
-                    </div>
-                    <h3 className="text-red-500 font-bold text-lg text-center mb-2">Zona de Perigo</h3>
-                    <p className="text-zinc-400 text-sm text-center mb-6">
-                        Isso excluirá permanentemente seu perfil e dados.
-                    </p>
-                    <div className="flex gap-3">
-                        <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-zinc-300 font-medium">Cancelar</button>
-                        <button onClick={handleDeleteAccount} className="flex-1 py-3 rounded-xl bg-red-600 text-white font-bold">Confirmar</button>
-                    </div>
-                </div>
-            </div>
-        )}
-
         {/* Header Actions */}
         <div className="fixed top-0 left-0 w-full z-50 p-4 flex justify-between items-start pointer-events-none">
-            <button 
-                onClick={onBack} 
-                className="w-10 h-10 flex items-center justify-center bg-black/40 backdrop-blur-md rounded-full text-white hover:bg-black/80 transition-all border border-white/10 shadow-lg pointer-events-auto"
-            >
-                <ArrowLeft size={20} />
-            </button>
+            <button onClick={onBack} className="w-10 h-10 flex items-center justify-center bg-zinc-900/80 backdrop-blur-md rounded-full text-white border border-white/10 shadow-lg pointer-events-auto hover:scale-105 transition-transform"><ArrowLeft size={20} /></button>
 
             {isOwnProfile && (
                  <div className="flex gap-2 pointer-events-auto">
@@ -256,214 +160,179 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
                          </button>
                      ) : (
                          <>
-                            <button onClick={() => setIsEditing(true)} className="w-10 h-10 flex items-center justify-center bg-black/40 backdrop-blur-md rounded-full text-zinc-200 hover:text-white border border-white/10">
-                                <Edit2 size={16} />
-                            </button>
-                            <button onClick={onSignOut} className="w-10 h-10 flex items-center justify-center bg-black/40 backdrop-blur-md rounded-full text-zinc-400 hover:text-red-400 border border-white/10">
-                                <LogOut size={16} />
-                            </button>
+                            <button onClick={() => setIsEditing(true)} className="w-10 h-10 flex items-center justify-center bg-zinc-900/80 backdrop-blur-md rounded-full text-zinc-200 hover:text-white border border-white/10"><Edit2 size={16} /></button>
+                            <button onClick={onSettings} className="w-10 h-10 flex items-center justify-center bg-zinc-900/80 backdrop-blur-md rounded-full text-zinc-400 hover:text-white border border-white/10 animate-fade-in"><Settings size={16} /></button>
                          </>
                      )}
                 </div>
             )}
         </div>
 
-        {/* Banner Gráfico */}
-        <div className="h-48 w-full bg-zinc-900 relative overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-b from-brand-primary/10 to-zinc-950"></div>
-            <div className="absolute top-0 right-0 w-64 h-64 bg-brand-primary/20 rounded-full blur-[80px] -mr-16 -mt-16"></div>
-            <div className="absolute bottom-0 left-0 w-48 h-48 bg-brand-secondary/10 rounded-full blur-[60px] -ml-10 -mb-10"></div>
-        </div>
-
-        {/* Profile Header */}
-        <div className="px-6 relative z-10 -mt-20">
-            <div className="flex flex-col items-center">
-                
-                {/* Avatar */}
-                <div className="relative mb-4 group">
-                    <div className="w-32 h-32 rounded-full border-4 border-zinc-950 bg-zinc-900 overflow-hidden shadow-2xl relative">
-                        <img 
-                            src={isEditing ? editAvatar : (profileUser.avatar_url || `https://ui-avatars.com/api/?name=${profileUser.name}&background=random`)} 
-                            alt="Profile" 
-                            className="w-full h-full object-cover"
-                        />
-                    </div>
-                    {isEditing && (
-                        <button 
-                            onClick={() => setShowAvatarSelector(!showAvatarSelector)}
-                            className="absolute bottom-1 right-1 bg-brand-primary text-zinc-950 p-2.5 rounded-full shadow-lg hover:scale-110 transition-transform border-4 border-zinc-950"
-                        >
-                            <Camera size={18} />
-                        </button>
-                    )}
-                </div>
-
-                {/* Seletor de Avatar */}
-                {isEditing && showAvatarSelector && (
-                    <div className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-4 animate-fade-in">
-                        <p className="text-xs text-zinc-500 font-bold uppercase mb-3">Escolha ou Envie</p>
-                        <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar mb-3">
-                             <button 
-                                onClick={() => fileInputRef.current?.click()}
-                                className="w-12 h-12 rounded-full bg-zinc-800 border border-dashed border-zinc-600 flex items-center justify-center shrink-0 hover:border-brand-primary text-zinc-400 hover:text-brand-primary"
-                            >
-                                <Upload size={20} />
-                                <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect}/>
-                            </button>
-                            {PRESET_AVATARS.map((url, i) => {
-                                const fullUrl = url.includes('=') ? url + profileUser.name : url + i;
-                                return (
-                                    <button key={i} onClick={() => { setEditAvatar(fullUrl); setShowAvatarSelector(false); }} className="w-12 h-12 rounded-full overflow-hidden shrink-0 border border-zinc-800 hover:border-brand-primary transition-colors">
-                                        <img src={fullUrl} className="w-full h-full object-cover" />
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    </div>
-                )}
-                
-                {/* Names */}
-                <h1 className="text-2xl font-bold text-zinc-100">{profileUser.name}</h1>
-                <p className="text-zinc-500 text-sm font-medium mb-4">@{profileUser.username}</p>
-
-                {/* Actions (Friend/Block) */}
-                {!isOwnProfile && (
-                    <div className="flex items-center gap-3 mb-6">
-                        {!isBlocked && (
-                            <>
-                                {friendshipStatus === 'accepted' ? (
-                                    <button onClick={() => onStartChat && onStartChat(profileUser)} className="bg-brand-primary text-zinc-950 px-6 py-2.5 rounded-full font-bold text-sm flex items-center gap-2 shadow-lg shadow-brand-primary/20 hover:scale-105 transition-transform">
-                                        <MessageCircle size={18} /> Mensagem
-                                    </button>
-                                ) : friendshipStatus === 'pending' ? (
-                                    <button className="bg-zinc-800 text-zinc-400 px-6 py-2.5 rounded-full font-medium text-sm flex items-center gap-2 cursor-default border border-zinc-700">
-                                        <Check size={18} /> Pendente
-                                    </button>
-                                ) : (
-                                    <button onClick={handleConnect} className="bg-zinc-100 text-zinc-950 px-6 py-2.5 rounded-full font-bold text-sm flex items-center gap-2 hover:scale-105 transition-transform">
-                                        <UserPlus size={18} /> Conectar
-                                    </button>
-                                )}
-                            </>
-                        )}
-                        <button onClick={handleBlockToggle} className={`p-2.5 rounded-full border transition-all ${isBlocked ? 'bg-blue-500/20 border-blue-500/50 text-blue-400' : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-red-400'}`}>
-                            {isBlocked ? <Snowflake size={20} /> : <Ban size={20} />}
-                        </button>
-                    </div>
-                )}
-
-                {/* Bio */}
-                {isEditing ? (
-                    <div className="w-full mb-6">
-                        <textarea 
-                            value={editBio}
-                            onChange={(e) => setEditBio(e.target.value)}
-                            placeholder="Escreva algo sobre você..."
-                            className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 text-sm text-zinc-200 focus:border-brand-primary/50 outline-none resize-none h-24"
-                            maxLength={150}
-                        />
-                        <div className="flex justify-end mt-1">
-                            <span className="text-[10px] text-zinc-600">{editBio.length}/150</span>
-                        </div>
-                    </div>
-                ) : (
-                    <p className="text-zinc-300 text-sm leading-relaxed text-center max-w-xs mb-8 opacity-80">
-                        {profileUser.bio || (isOwnProfile ? "Toque no lápis para adicionar uma bio." : "Sem bio.")}
-                    </p>
-                )}
-
-                {/* Stats Grid */}
-                <div className="grid grid-cols-3 gap-3 w-full mb-8">
-                    <StatCard 
-                        icon={<Users size={18} />} 
-                        value={friendsCount} 
-                        label="Amigos" 
+        {/* Profile Card Main */}
+        <div className="pt-24 px-6 flex flex-col items-center relative">
+            
+            {/* Avatar Ring */}
+            <div className="relative mb-5 group">
+                <div className="w-28 h-28 rounded-[2rem] p-[3px] bg-gradient-to-br from-zinc-700 to-zinc-900 shadow-2xl relative overflow-hidden">
+                    <img 
+                        src={isEditing ? editAvatar : (profileUser.avatar_url || `https://ui-avatars.com/api/?name=${profileUser.name}&background=random`)} 
+                        alt="Profile" 
+                        className="w-full h-full object-cover rounded-[1.8rem] bg-zinc-950"
                     />
-                    <StatCard 
-                        icon={<Zap size={18} />} 
-                        value={userPulses.length} 
-                        label="Vibes" 
-                    />
-                    {!isOwnProfile && resonanceScore > 0 ? (
-                        <StatCard 
-                            icon={<Radio size={18} />} 
-                            value={`${resonanceScore}%`} 
-                            label="Ressonância"
-                            highlight 
-                        />
-                    ) : (
-                         <StatCard 
-                            icon={<Calendar size={18} />} 
-                            value="2024" 
-                            label="Desde" 
-                        />
-                    )}
+                    {/* Activity Dot */}
+                    <div className="absolute bottom-2 right-2 w-4 h-4 bg-brand-primary rounded-full border-[3px] border-zinc-950"></div>
                 </div>
-
-                {isOwnProfile && (
-                     <button onClick={() => setShowDeleteConfirm(true)} className="flex items-center gap-2 text-[10px] uppercase font-bold tracking-widest text-red-500/60 hover:text-red-500 bg-red-500/5 px-4 py-2 rounded-lg hover:bg-red-500/10 transition-colors mb-6">
-                        <Trash2 size={12} /> Excluir Conta
+                {isEditing && (
+                    <button onClick={() => setShowAvatarSelector(!showAvatarSelector)} className="absolute -bottom-2 -right-2 bg-zinc-100 text-zinc-950 p-2 rounded-full shadow-lg hover:scale-110 transition-transform">
+                        <Camera size={16} />
                     </button>
                 )}
-
             </div>
-        </div>
 
-        {/* Galeria de Vibes */}
-        <div className="px-6 border-t border-zinc-900 pt-6">
-            <h3 className="text-sm font-semibold text-zinc-400 mb-4 flex items-center gap-2">
-                <Activity size={14} className="text-brand-primary"/>
-                Histórico de Vibe
-            </h3>
-
-            {userPulses.length === 0 ? (
-                <div className="py-12 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800 text-center flex flex-col items-center justify-center">
-                    <Zap size={24} className="text-zinc-700 mb-2" />
-                    <p className="text-zinc-500 text-xs italic">Nenhuma vibe registrada.</p>
+            {/* Avatar Selector Panel */}
+            {isEditing && showAvatarSelector && (
+                <div className="w-full bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 mb-4 animate-fade-in backdrop-blur-md z-20">
+                    <p className="text-[10px] text-zinc-500 font-bold uppercase mb-3">Origem da Imagem</p>
+                    <div className="flex gap-3 overflow-x-auto pb-2 no-scrollbar">
+                            <button onClick={() => fileInputRef.current?.click()} className="w-12 h-12 rounded-xl bg-zinc-800 border border-dashed border-zinc-600 flex items-center justify-center shrink-0 hover:border-brand-primary text-zinc-400 hover:text-brand-primary"><Upload size={20} /><input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect}/></button>
+                            {PRESET_AVATARS.map((url, i) => {
+                                const fullUrl = url.includes('=') ? url + profileUser.name : url + i;
+                                return ( <button key={i} onClick={() => { setEditAvatar(fullUrl); setShowAvatarSelector(false); }} className="w-12 h-12 rounded-xl overflow-hidden shrink-0 border border-zinc-800 hover:border-brand-primary transition-colors"><img src={fullUrl} className="w-full h-full object-cover" /></button>)
+                            })}
+                    </div>
                 </div>
+            )}
+            
+            <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">{profileUser.name}</h1>
+            <p className="text-brand-primary text-xs font-mono mb-4 bg-brand-primary/10 px-3 py-1 rounded-full">@{profileUser.username}</p>
+
+            {/* Bio Area */}
+            {isEditing ? (
+                <textarea 
+                    value={editBio}
+                    onChange={(e) => setEditBio(e.target.value)}
+                    placeholder="Sua bio..."
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-3 text-sm text-zinc-200 focus:border-brand-primary/50 outline-none resize-none h-20 mb-4"
+                    maxLength={150}
+                />
             ) : (
+                <p className="text-zinc-400 text-sm text-center max-w-xs mb-6 leading-relaxed">
+                    {profileUser.bio || "Sem descrição disponível."}
+                </p>
+            )}
+
+            {/* Action Buttons (Non-Owner) */}
+            {!isOwnProfile && !isBlocked && (
+                <div className="flex gap-3 mb-8 w-full justify-center">
+                    {friendshipStatus === 'accepted' ? (
+                        <button onClick={() => onStartChat && onStartChat(profileUser)} className="bg-zinc-100 text-zinc-950 px-8 py-3 rounded-xl font-bold text-sm shadow-[0_0_20px_rgba(255,255,255,0.1)] hover:scale-105 transition-transform flex items-center gap-2">
+                            <MessageCircle size={18} /> Iniciar Chat
+                        </button>
+                    ) : friendshipStatus === 'pending' ? (
+                        <button className="bg-zinc-800 text-zinc-500 px-8 py-3 rounded-xl font-medium text-sm border border-zinc-700 cursor-not-allowed flex items-center gap-2">
+                            <Check size={18} /> Enviado
+                        </button>
+                    ) : (
+                        <button onClick={handleConnect} className="bg-brand-primary text-zinc-950 px-8 py-3 rounded-xl font-bold text-sm hover:scale-105 transition-transform shadow-[0_0_20px_rgba(16,185,129,0.2)] flex items-center gap-2">
+                            <UserPlus size={18} /> Conectar
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Dashboard Grid */}
+            <div className="w-full grid grid-cols-2 gap-4 mb-6">
+                 {/* Card 1: Friends */}
+                 <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl flex flex-col justify-between h-24 relative overflow-hidden group">
+                     <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Users size={40} /></div>
+                     <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider">Conexões</span>
+                     <span className="text-3xl font-bold text-zinc-100">{friendsCount}</span>
+                 </div>
+
+                 {/* Card 2: Vibes */}
+                 <div className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-2xl flex flex-col justify-between h-24 relative overflow-hidden group">
+                     <div className="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Zap size={40} /></div>
+                     <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-wider">Vibes</span>
+                     <span className="text-3xl font-bold text-zinc-100">{userPulses.length}</span>
+                 </div>
+            </div>
+
+            {/* Chart Section (Activity Resonance) */}
+            <div className="w-full bg-zinc-900/30 border border-zinc-800 rounded-3xl p-5 mb-8 backdrop-blur-sm">
+                <div className="flex items-center justify-between mb-4">
+                     <h3 className="text-xs font-bold text-zinc-300 flex items-center gap-2">
+                         <Activity size={14} className="text-brand-primary" /> RESSONÂNCIA (7 Dias)
+                     </h3>
+                     {resonanceScore > 0 && <span className="text-[10px] text-brand-primary bg-brand-primary/10 px-2 py-1 rounded-md">{resonanceScore}% Match</span>}
+                </div>
+                <div className="h-40 w-full">
+                    {activityData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={activityData}>
+                                <defs>
+                                    <linearGradient id="colorActivity" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
+                                <XAxis 
+                                    dataKey="fullDate" 
+                                    tick={{fontSize: 9, fill: '#52525b'}} 
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    interval="preserveStartEnd"
+                                />
+                                <Tooltip 
+                                    contentStyle={{backgroundColor: '#18181b', border: '1px solid #27272a', borderRadius: '8px', fontSize: '10px'}} 
+                                    itemStyle={{color: '#fff'}} 
+                                    cursor={{stroke: '#52525b', strokeWidth: 1}}
+                                    labelFormatter={() => ''}
+                                />
+                                <Area 
+                                    type="monotone" 
+                                    dataKey="total" 
+                                    stroke="#10b981" 
+                                    strokeWidth={2} 
+                                    fillOpacity={1} 
+                                    fill="url(#colorActivity)" 
+                                    animationDuration={1500}
+                                />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    ) : (
+                        <div className="flex items-center justify-center h-full text-zinc-600 text-xs italic">
+                            Sem dados de ressonância suficientes.
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Recent Vibes */}
+            <div className="w-full">
+                <h3 className="text-xs font-bold text-zinc-500 mb-4 uppercase tracking-wider pl-1">Histórico Recente</h3>
                 <div className="grid grid-cols-2 gap-3">
                     {userPulses.map(pulse => (
                          <div 
                             key={pulse.id} 
                             onClick={() => handlePulseClick(pulse)}
-                            className={`aspect-[3/4] bg-zinc-900 rounded-2xl overflow-hidden relative border border-zinc-800/50 group ${!isOwnProfile && friendshipStatus === 'accepted' ? 'cursor-pointer active:scale-95 transition-transform hover:border-brand-primary/50' : ''}`}
+                            className="bg-zinc-900/60 border border-zinc-800 rounded-2xl overflow-hidden relative aspect-[4/5] group"
                         >
-                             {pulse.content_type === 'image' ? (
-                                 <img src={pulse.content} className="w-full h-full object-cover" />
-                             ) : (
-                                 <div className="w-full h-full p-3 flex items-center justify-center text-center bg-gradient-to-br from-zinc-800 to-zinc-900">
-                                     <p className="text-[10px] text-zinc-300 font-serif italic line-clamp-5">"{pulse.content}"</p>
-                                 </div>
-                             )}
-                             
-                             <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent opacity-0 hover:opacity-100 transition-opacity flex flex-col justify-end p-3">
-                                <p className="text-[10px] text-white/90 line-clamp-2 leading-tight">{pulse.description || pulse.content}</p>
-                                {!isOwnProfile && friendshipStatus === 'accepted' && (
-                                    <div className="mt-2 flex items-center gap-1 text-[10px] text-brand-primary font-bold">
-                                        <Reply size={10} /> Responder
-                                    </div>
-                                )}
-                             </div>
-
-                             {isOwnProfile && (
-                                 <button 
-                                    onClick={async (e) => {
-                                        e.stopPropagation();
-                                        if(window.confirm("Apagar vibe?")) {
-                                            const ok = await deletePulse(pulse.id);
-                                            if(ok) removePulseFromList(pulse.id);
-                                        }
-                                    }}
-                                    className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm p-2 rounded-full text-white/70 hover:text-red-400 hover:bg-black/80 transition-all"
-                                 >
-                                     <Trash2 size={12} /> 
-                                 </button>
-                             )}
+                            {pulse.content_type === 'image' ? (
+                                <img src={pulse.content} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+                            ) : (
+                                <div className="w-full h-full p-4 flex items-center justify-center text-center bg-zinc-900">
+                                    <p className="text-[10px] text-zinc-400 font-mono italic">"{pulse.content}"</p>
+                                </div>
+                            )}
+                            <div className="absolute top-2 left-2 bg-black/50 backdrop-blur-md px-2 py-0.5 rounded-md border border-white/5">
+                                <p className="text-[8px] text-zinc-300">{new Date(pulse.created_at).toLocaleDateString()}</p>
+                            </div>
                          </div>
                     ))}
+                    {userPulses.length === 0 && <p className="text-zinc-600 text-xs col-span-2 text-center py-8 italic">Nenhuma vibe transmitida ainda.</p>}
                 </div>
-            )}
+            </div>
         </div>
     </div>
   );

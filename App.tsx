@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
@@ -6,6 +7,7 @@ import HomeScreen from './screens/HomeScreen';
 import ChatScreen from './screens/ChatScreen';
 import EcoScreen from './screens/EcoScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import SettingsScreen from './screens/SettingsScreen'; // Novo
 import { AppScreen, User } from './types';
 import { getChatId } from './services/dataService';
 
@@ -122,12 +124,27 @@ const AppContent: React.FC = () => {
     );
   }
 
+  // Settings Screen
+  if (currentScreen === AppScreen.SETTINGS) {
+      return (
+          <SettingsScreen 
+            onBack={() => window.history.back()}
+            onNavigateProfile={() => {
+                // Navigate to own profile but inside layout context? Or keep as full?
+                // Let's use standard nav
+                navigateTo(AppScreen.PROFILE);
+            }}
+            onLogout={signOut}
+          />
+      );
+  }
+
   if (currentScreen === AppScreen.USER_PROFILE && viewProfileId) {
       return (
           <ProfileScreen 
             targetUserId={viewProfileId}
             onBack={() => window.history.back()}
-            onSignOut={() => {}}
+            onSettings={() => navigateTo(AppScreen.SETTINGS)}
             onStartChat={handleStartChatFromProfile}
           />
       );
@@ -138,7 +155,7 @@ const AppContent: React.FC = () => {
           <Layout activeScreen={AppScreen.PROFILE} onNavigate={handleNavClick}>
             <ProfileScreen 
                 onBack={() => handleNavClick(AppScreen.HOME)}
-                onSignOut={signOut}
+                onSettings={() => navigateTo(AppScreen.SETTINGS)}
                 onStartChat={handleStartChatFromProfile}
             />
           </Layout>
