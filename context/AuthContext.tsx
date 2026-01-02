@@ -71,8 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const internalEmail = `${cleanUsername}@elo.app`;
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
 
-    // A criação do user_meta agora é feita via SQL TRIGGER no banco de dados.
-    // Isso evita o erro de permissão/conflito no front-end.
+    // 1. Cria o usuário na Auth do Supabase
     const { data, error } = await supabase.auth.signUp({
         email: internalEmail,
         password,
@@ -85,6 +84,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         }
     });
+
+    if (error) return { data, error };
+
+    // 2. CRUCIAL: Força a inserção na tabela pública 'users_meta' caso a trigger do banco falhe ou não exista.
+    // Isso garante que o usuário seja encontrado na busca de amigos imediatamente.
+    if (data.user) {
+        const { error: metaError } = await supabase
+            .from('users_meta')
+            .upsert({
+                user_id: data.user.id,
+                username: cleanUsername,
+                name: name,
+                avatar_url: avatarUrl,
+                phone: phone,
+                bio: ''
+            }, { onConflict: 'user_id' }); // Se já existir (pela trigger), apenas atualiza
+            
+        if (metaError) {
+            console.error("Erro ao sincronizar perfil público:", metaError);
+            // Não bloqueia o fluxo, mas loga o erro
+        }
+    }
     
     return { data, error };
   };

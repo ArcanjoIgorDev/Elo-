@@ -1,4 +1,4 @@
-import { Pulse, Message, EcoData, SearchResult, ChatSummary, User, EmotionalState, Topic, ReactionType, PulseReactionCounts } from '../types';
+import { Pulse, Message, EcoData, SearchResult, ChatSummary, User, EmotionalState, Topic, ReactionType, PulseReactionCounts, Notification } from '../types';
 import { supabase } from '../lib/supabaseClient';
 
 // --- HELPER: Gera ID único para conversa entre dois usuários ---
@@ -20,7 +20,6 @@ export const fetchDailyTopic = async (): Promise<Topic> => {
             .limit(1)
             .single();
         
-        // Se der erro ou não tiver tópico, retorna o padrão para a UI não quebrar
         if (error || !data) return defaultTopic;
         return data as Topic;
     } catch (e) {
@@ -194,8 +193,6 @@ export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary
         if (!messages) return [];
 
         const chatMap = new Map<string, ChatSummary>();
-
-        // Cache simples para evitar requests repetidos para mesmo usuario deletado
         const userCache = new Map<string, any>();
 
         for (const msg of messages) {
@@ -213,12 +210,10 @@ export const fetchUserChats = async (currentUserId: string): Promise<ChatSummary
                             .eq('user_id', otherId)
                             .single();
                         
-                        // LÓGICA DE USUÁRIO EXCLUÍDO
-                        // Se não retornou data, o usuário foi deletado do banco
                         userData = data || {
                             name: 'Usuário Excluído',
                             username: 'desconhecido',
-                            avatar_url: '', // Avatar vazio
+                            avatar_url: '',
                             is_deleted: true
                         };
                         userCache.set(otherId, userData);
@@ -263,13 +258,21 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
         const results = await Promise.all(users.map(async (u: any) => {
             const { data: friendship } = await supabase
                 .from('friendships')
-                .select('status, blocked_by')
+                .select('status, blocked_by, user_id, friend_id')
                 .or(`and(user_id.eq.${currentUserId},friend_id.eq.${u.user_id}),and(user_id.eq.${u.user_id},friend_id.eq.${currentUserId})`)
                 .single();
 
-            // Se eu fui bloqueado por ele, não vejo ele na busca (ou vejo como pendente/null)
-            if (friendship && friendship.status === 'blocked' && friendship.blocked_by === u.user_id) {
-                return null;
+            // Lógica de Status
+            let status = null;
+            if (friendship) {
+                if (friendship.status === 'blocked' && friendship.blocked_by === u.user_id) {
+                    return null; // Não mostrar se fui bloqueado
+                }
+                status = friendship.status;
+                
+                // Se o status for rejected e eu fui quem pediu, mostrar como se não tivesse nada (para tentar de novo se quiser)
+                // OU mostrar 'rejected' para feedback
+                if (status === 'rejected') status = null; 
             }
 
             return {
@@ -282,7 +285,7 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
                     bio: u.bio,
                     phone: ''
                 },
-                friendshipStatus: friendship ? friendship.status : null
+                friendshipStatus: status
             };
         }));
 
@@ -296,13 +299,31 @@ export const searchUsers = async (query: string, currentUserId: string): Promise
 
 export const sendFriendRequest = async (currentUserId: string, targetUserId: string) => {
     try {
-        const { data } = await supabase.from('friendships')
+        // Verificar se já existe uma amizade ou pedido (mesmo que rejeitado)
+        const { data: existing, error: fetchError } = await supabase.from('friendships')
             .select('*')
             .or(`and(user_id.eq.${currentUserId},friend_id.eq.${targetUserId}),and(user_id.eq.${targetUserId},friend_id.eq.${currentUserId})`)
             .single();
 
-        if (data) return true; 
+        if (existing) {
+            // Se foi rejeitada, atualiza para pending novamente
+            if (existing.status === 'rejected') {
+                const { error } = await supabase
+                    .from('friendships')
+                    .update({ 
+                        status: 'pending', 
+                        user_id: currentUserId, // Importante: quem pede agora é o currentUser
+                        friend_id: targetUserId,
+                        blocked_by: null
+                    })
+                    .eq('id', existing.id);
+                if (error) throw error;
+                return true;
+            }
+            return true; // Já existe (pending ou accepted)
+        }
 
+        // Se não existe, cria nova
         const { error } = await supabase
             .from('friendships')
             .insert([{ user_id: currentUserId, friend_id: targetUserId, status: 'pending' }]);
@@ -315,45 +336,93 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
     }
 };
 
-export const fetchPendingRequests = async (currentUserId: string) => {
+// --- NOVO SISTEMA DE NOTIFICAÇÕES (Pedidos + Status) ---
+
+export const fetchNotifications = async (currentUserId: string): Promise<Notification[]> => {
     try {
+        // Buscar pedidos onde eu sou o amigo (friend_id) e status é pending (ALGUÉM ME PEDIU)
+        // OU onde eu sou o user (user_id) e status é accepted/rejected (ALGUÉM RESPONDEU MEU PEDIDO)
+        
         const { data: requests, error } = await supabase
             .from('friendships')
-            .select('id, user_id, created_at')
-            .eq('friend_id', currentUserId)
-            .eq('status', 'pending');
+            .select('id, user_id, friend_id, status, created_at, updated_at')
+            .or(`and(friend_id.eq.${currentUserId},status.eq.pending),and(user_id.eq.${currentUserId},status.in.(accepted,rejected))`)
+            .order('updated_at', { ascending: false });
 
         if (error) throw error;
         if (!requests || requests.length === 0) return [];
 
-        const enrichedRequests = await Promise.all(requests.map(async (req) => {
+        const notifications: Notification[] = [];
+
+        for (const req of requests) {
+            // Determinar o "outro" usuário
+            const isIncomingRequest = req.friend_id === currentUserId && req.status === 'pending';
+            const isStatusUpdate = req.user_id === currentUserId && (req.status === 'accepted' || req.status === 'rejected');
+            
+            const otherUserId = isIncomingRequest ? req.user_id : req.friend_id;
+
             const { data: u } = await supabase
                 .from('users_meta')
                 .select('*')
-                .eq('user_id', req.user_id)
+                .eq('user_id', otherUserId)
                 .single();
+
+            if (!u) continue; // Usuário deletado
+
+            let type: 'FRIEND_REQUEST' | 'REQUEST_ACCEPTED' | 'REQUEST_REJECTED' | null = null;
             
-            // Check se o usuário ainda existe
-            if (!u) return null;
+            if (isIncomingRequest) type = 'FRIEND_REQUEST';
+            else if (req.status === 'accepted') type = 'REQUEST_ACCEPTED';
+            else if (req.status === 'rejected') type = 'REQUEST_REJECTED';
 
-            return {
-                requestId: req.id,
-                user: {
-                    id: u.user_id,
-                    name: u.name,
-                    username: u.username,
-                    avatar_url: u.avatar_url,
-                    email: ''
-                } as User
-            };
-        }));
+            if (type) {
+                notifications.push({
+                    id: req.id,
+                    type: type,
+                    user: {
+                        id: u.user_id,
+                        name: u.name,
+                        username: u.username,
+                        avatar_url: u.avatar_url,
+                        email: ''
+                    },
+                    timestamp: req.updated_at || req.created_at,
+                    read: false // Idealmente salvaríamos isso no banco, mas por simplicidade assumimos false
+                });
+            }
+        }
 
-        // Remove itens nulos (de usuários deletados)
-        return enrichedRequests.filter(req => req !== null) as {requestId: string, user: User}[];
+        return notifications;
     } catch (e) {
-        console.error("Erro ao buscar solicitações", e);
+        console.error("Erro ao buscar notificações", e);
         return [];
     }
+};
+
+// Limpa notificações que são apenas informativas (Aceito/Recusado)
+// Para 'rejected', podemos deletar a row ou mudar status para 'deleted_notification' se tivéssemos essa coluna.
+// Como não temos, vamos DELETAR o registro de amizade se for 'rejected' e o usuário dispensar.
+// Se for 'accepted', apenas removemos da UI localmente (o status continua accepted no banco para manter a amizade).
+export const clearNotification = async (notificationId: string, type: string) => {
+    try {
+        if (type === 'REQUEST_REJECTED') {
+            // Se foi rejeitado e o usuário viu, podemos limpar do banco para ele poder pedir de novo no futuro
+            await supabase.from('friendships').delete().eq('id', notificationId);
+        }
+        // Se for accepted, não fazemos nada no banco, a UI filtra (ou precisaríamos de uma tabela de notificações real)
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+export const fetchPendingRequests = async (currentUserId: string) => {
+    // Mantido para compatibilidade, mas agora usamos fetchNotifications
+    const notifs = await fetchNotifications(currentUserId);
+    return notifs.filter(n => n.type === 'FRIEND_REQUEST').map(n => ({
+        requestId: n.id,
+        user: n.user
+    }));
 };
 
 export const respondToFriendRequest = async (requestId: string, accept: boolean) => {
@@ -361,16 +430,24 @@ export const respondToFriendRequest = async (requestId: string, accept: boolean)
         if (accept) {
             await supabase
                 .from('friendships')
-                .update({ status: 'accepted' })
+                .update({ 
+                    status: 'accepted',
+                    updated_at: new Date().toISOString()
+                })
                 .eq('id', requestId);
         } else {
+            // NÃO DELETAR. Marcar como rejeitado para o remetente ser notificado.
             await supabase
                 .from('friendships')
-                .delete()
+                .update({ 
+                    status: 'rejected',
+                    updated_at: new Date().toISOString()
+                })
                 .eq('id', requestId);
         }
         return true;
     } catch (e) {
+        console.error("Erro ao responder:", e);
         return false;
     }
 };

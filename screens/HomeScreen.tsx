@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { fetchPulses, createPulse, fetchUserChats, searchUsers, getChatId, sendFriendRequest, fetchPendingRequests, respondToFriendRequest, fetchDailyTopic } from '../services/dataService';
-import { Pulse, AppScreen, ChatSummary, User, EmotionalState } from '../types';
+import { fetchPulses, createPulse, fetchUserChats, searchUsers, getChatId, sendFriendRequest, fetchNotifications, respondToFriendRequest, fetchDailyTopic, clearNotification } from '../services/dataService';
+import { Pulse, AppScreen, ChatSummary, User, EmotionalState, Notification } from '../types';
 import PulseCard from '../components/PulseCard';
-import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Smile, Frown, Meh, Battery, BatteryCharging, Hash, Hexagon, User as UserIcon, Check, Bell, Flame, PenTool } from 'lucide-react';
+import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Smile, Frown, Meh, Battery, BatteryCharging, Hash, Hexagon, User as UserIcon, Check, Bell, Flame, PenTool, ArrowRight, UserCheck, UserX } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface HomeScreenProps {
@@ -30,10 +30,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   // Friends & Notifications
   const [isAddingFriend, setIsAddingFriend] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [pendingRequests, setPendingRequests] = useState<{requestId: string, user: User}[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [userSearchResults, setUserSearchResults] = useState<{user: User, friendshipStatus: string | null}[]>([]);
   const [isSearchingUsers, setIsSearchingUsers] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Daily Topic
   const [dailyTopic, setDailyTopic] = useState("Carregando inspiração...");
@@ -41,6 +42,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   useEffect(() => {
     if (user) {
         refreshData();
+        // Polling para notificações em tempo real (simulado)
+        const interval = setInterval(() => {
+            fetchNotifications(user.id).then(setNotifications);
+        }, 10000);
+        return () => clearInterval(interval);
     }
   }, [user]);
 
@@ -51,17 +57,27 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       }
   }, [isCreatingPulse]);
 
+  // Toast Timer
+  useEffect(() => {
+      if(toastMessage) {
+          const t = setTimeout(() => setToastMessage(null), 3000);
+          return () => clearTimeout(t);
+      }
+  }, [toastMessage]);
+
+  const showToast = (msg: string) => setToastMessage(msg);
+
   const refreshData = () => {
     setLoading(true);
     Promise.all([
         fetchPulses(),
         fetchUserChats(user!.id),
-        fetchPendingRequests(user!.id),
+        fetchNotifications(user!.id),
         fetchDailyTopic()
-    ]).then(([pulsesData, chatsData, requestsData, topicData]) => {
+    ]).then(([pulsesData, chatsData, notifData, topicData]) => {
         setPulses(pulsesData);
         setChats(chatsData);
-        setPendingRequests(requestsData);
+        setNotifications(notifData);
         if(topicData) setDailyTopic(topicData.title);
         setLoading(false);
     });
@@ -108,6 +124,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
     setNewPulseDescription('');
     setPulseImage(null);
     setPulseEmotion('neutro');
+    showToast("Vibe compartilhada!");
     refreshData();
   };
 
@@ -137,14 +154,22 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       setUserSearchResults(prev => prev.map(item => 
           item.user.id === targetId ? {...item, friendshipStatus: 'pending'} : item
       ));
+      showToast("Solicitação enviada!");
   };
 
   const handleRespondRequest = async (reqId: string, accept: boolean) => {
       const success = await respondToFriendRequest(reqId, accept);
       if (success) {
-          setPendingRequests(prev => prev.filter(r => r.requestId !== reqId));
+          // Otimistic update
+          setNotifications(prev => prev.filter(n => n.id !== reqId));
+          showToast(accept ? "Conexão aceita!" : "Solicitação recusada.");
           if(accept) refreshData(); 
       }
+  };
+
+  const handleClearNotification = async (n: Notification) => {
+      await clearNotification(n.id, n.type);
+      setNotifications(prev => prev.filter(item => item.id !== n.id));
   };
 
   const openExistingChat = (summary: ChatSummary) => {
@@ -172,6 +197,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   return (
     <div className="pb-24 h-full flex flex-col bg-zinc-950 relative">
       
+      {/* Toast Notification */}
+      {toastMessage && (
+          <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[60] bg-zinc-100 text-zinc-950 px-6 py-2 rounded-full shadow-lg font-bold text-xs animate-fade-in flex items-center gap-2">
+              <Check size={14} />
+              {toastMessage}
+          </div>
+      )}
+
       {/* --- HEADER --- */}
       <header className="flex justify-between items-center px-6 pt-6 pb-2 shrink-0 bg-zinc-950 sticky top-0 z-10">
           <div className="flex items-center gap-2.5">
@@ -185,11 +218,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
           <div className="flex items-center gap-3">
              <button 
                 onClick={() => setIsNotificationsOpen(true)}
-                className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white transition-colors relative"
+                className={`w-9 h-9 rounded-full bg-zinc-900 border flex items-center justify-center transition-colors relative ${notifications.length > 0 ? 'border-brand-primary/30 text-brand-primary bg-brand-primary/10' : 'border-zinc-800 text-zinc-400 hover:text-white'}`}
             >
-                <Bell size={18} />
-                {pendingRequests.length > 0 && (
-                    <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-zinc-900"></span>
+                <Bell size={18} className={notifications.length > 0 ? 'animate-pulse' : ''} />
+                {notifications.length > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-zinc-900"></span>
                 )}
             </button>
              
@@ -197,7 +230,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                 onClick={() => setIsAddingFriend(true)}
                 className="w-9 h-9 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
             >
-                <Search size={18} />
+                <UserPlus size={18} />
             </button>
             <button 
                 onClick={() => onNavigate(AppScreen.PROFILE)}
@@ -216,28 +249,46 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       {isNotificationsOpen && (
           <div className="absolute inset-0 z-50 bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
              <div className="flex justify-between items-center mb-6">
-                 <h2 className="text-lg font-bold text-zinc-100">Notificações</h2>
-                 <button onClick={() => setIsNotificationsOpen(false)} className="p-2 bg-zinc-900 rounded-full text-zinc-400">
+                 <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
+                     <Bell size={20} className="text-brand-primary" /> Notificações
+                 </h2>
+                 <button onClick={() => setIsNotificationsOpen(false)} className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white">
                      <X size={20} />
                  </button>
              </div>
              
              <div className="flex-1 overflow-y-auto space-y-4">
-                 <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">Solicitações de Amizade</h3>
-                 {pendingRequests.length === 0 ? (
-                     <p className="text-sm text-zinc-600 italic">Nenhuma solicitação pendente.</p>
+                 {notifications.length === 0 ? (
+                     <div className="flex flex-col items-center justify-center h-40 opacity-40">
+                         <Bell size={40} className="mb-2" />
+                         <p className="text-sm text-zinc-500 italic">Nada por aqui.</p>
+                     </div>
                  ) : (
-                     pendingRequests.map(req => (
-                         <div key={req.requestId} className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex items-center gap-4">
-                             <img src={req.user.avatar_url} className="w-10 h-10 rounded-full" />
+                     notifications.map(notif => (
+                         <div key={notif.id} className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex items-center gap-4 relative overflow-hidden group">
+                             {/* Indicador lateral */}
+                             <div className={`absolute left-0 top-0 bottom-0 w-1 ${notif.type === 'FRIEND_REQUEST' ? 'bg-brand-primary' : notif.type === 'REQUEST_REJECTED' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
+                             
+                             <img src={notif.user.avatar_url} className="w-10 h-10 rounded-full bg-zinc-800" />
                              <div className="flex-1">
-                                 <h4 className="text-zinc-100 font-medium">{req.user.name}</h4>
-                                 <p className="text-xs text-zinc-500">@{req.user.username}</p>
+                                 <h4 className="text-zinc-100 font-medium text-sm">
+                                     {notif.type === 'FRIEND_REQUEST' && <span><span className="font-bold">{notif.user.name}</span> quer conectar.</span>}
+                                     {notif.type === 'REQUEST_ACCEPTED' && <span><span className="font-bold">{notif.user.name}</span> aceitou seu pedido!</span>}
+                                     {notif.type === 'REQUEST_REJECTED' && <span><span className="font-bold">{notif.user.name}</span> recusou o pedido.</span>}
+                                 </h4>
+                                 <p className="text-[10px] text-zinc-500 mt-1">@{notif.user.username}</p>
                              </div>
-                             <div className="flex gap-2">
-                                 <button onClick={() => handleRespondRequest(req.requestId, false)} className="p-2 bg-zinc-800 rounded-full text-red-400"><X size={16}/></button>
-                                 <button onClick={() => handleRespondRequest(req.requestId, true)} className="p-2 bg-brand-primary text-zinc-950 rounded-full"><Check size={16}/></button>
-                             </div>
+
+                             {notif.type === 'FRIEND_REQUEST' ? (
+                                 <div className="flex gap-2">
+                                     <button onClick={() => handleRespondRequest(notif.id, false)} className="p-2 bg-zinc-800 rounded-full text-red-400 hover:bg-red-500/10"><X size={16}/></button>
+                                     <button onClick={() => handleRespondRequest(notif.id, true)} className="p-2 bg-brand-primary text-zinc-950 rounded-full hover:scale-105 transition-transform"><Check size={16}/></button>
+                                 </div>
+                             ) : (
+                                 <button onClick={() => handleClearNotification(notif)} className="p-2 text-zinc-600 hover:text-zinc-400">
+                                     <X size={14} />
+                                 </button>
+                             )}
                          </div>
                      ))
                  )}
@@ -294,18 +345,20 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                  <div className="flex justify-between items-center pt-4 border-t border-zinc-900">
                      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageSelect}/>
                      <button onClick={() => fileInputRef.current?.click()} className="p-3 bg-zinc-900 rounded-full text-zinc-400 hover:text-zinc-100"><ImageIcon size={20} /></button>
-                     <button disabled={sendingPulse || (!newPulseContent.trim() && !pulseImage)} onClick={handleCreatePulse} className="bg-brand-primary text-zinc-950 font-bold px-6 py-3 rounded-full flex items-center gap-2 disabled:opacity-50">{sendingPulse ? 'Enviando...' : 'Publicar'}<Send size={18} /></button>
+                     <button disabled={sendingPulse || (!newPulseContent.trim() && !pulseImage)} onClick={handleCreatePulse} className="bg-brand-primary text-zinc-950 font-bold px-6 py-3 rounded-full flex items-center gap-2 disabled:opacity-50 hover:scale-105 transition-transform">{sendingPulse ? 'Enviando...' : 'Publicar'}<Send size={18} /></button>
                  </div>
              </div>
           </div>
       )}
 
-      {/* --- BUSCA MODAL --- */}
+      {/* --- BUSCA DE USUÁRIOS MODAL --- */}
       {isAddingFriend && (
           <div className="absolute inset-0 z-50 bg-zinc-950/95 backdrop-blur-sm flex flex-col p-6 animate-fade-in">
              <div className="flex justify-between items-center mb-6">
-                 <h2 className="text-lg font-bold text-zinc-100">Nova Conexão</h2>
-                 <button onClick={() => { setIsAddingFriend(false); setUserSearchQuery(''); setUserSearchResults([]) }} className="p-2 bg-zinc-900 rounded-full text-zinc-400">
+                 <h2 className="text-lg font-bold text-zinc-100 flex items-center gap-2">
+                     <UserPlus size={20} className="text-brand-secondary" /> Nova Conexão
+                 </h2>
+                 <button onClick={() => { setIsAddingFriend(false); setUserSearchQuery(''); setUserSearchResults([]) }} className="p-2 bg-zinc-900 rounded-full text-zinc-400 hover:text-white">
                      <X size={20} />
                  </button>
              </div>
@@ -317,8 +370,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                     type="text"
                     value={userSearchQuery}
                     onChange={(e) => handleUserSearch(e.target.value)}
-                    placeholder="Buscar usuário..."
-                    className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 pl-11 pr-4 py-3.5 rounded-2xl outline-none focus:border-brand-primary/50"
+                    placeholder="Buscar pelo @username..."
+                    className="w-full bg-zinc-900 border border-zinc-800 text-zinc-100 pl-11 pr-4 py-3.5 rounded-2xl outline-none focus:border-brand-primary/50 transition-colors"
                  />
              </div>
 
@@ -327,18 +380,23 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                      <div className="flex justify-center mt-10"><Loader2 className="animate-spin text-zinc-600" /></div>
                  ) : userSearchResults.length > 0 ? (
                      userSearchResults.map(result => (
-                         <div key={result.user.id} className="bg-zinc-900/50 border border-zinc-800 p-4 rounded-xl flex items-center gap-4">
-                             <img src={result.user.avatar_url} className="w-10 h-10 rounded-full bg-zinc-800 object-cover" />
-                             <div className="flex-1">
-                                 <h3 className="text-zinc-100 font-semibold">{result.user.name}</h3>
-                                 <p className="text-zinc-500 text-xs">@{result.user.username}</p>
+                         <div key={result.user.id} className="bg-zinc-900/40 border border-zinc-800 p-4 rounded-xl flex items-center gap-4 hover:bg-zinc-900 transition-colors">
+                             <img src={result.user.avatar_url} className="w-12 h-12 rounded-full bg-zinc-800 object-cover" />
+                             <div className="flex-1 min-w-0">
+                                 <h3 className="text-zinc-100 font-semibold truncate">{result.user.name}</h3>
+                                 <p className="text-zinc-500 text-xs truncate">@{result.user.username}</p>
                              </div>
+                             
+                             {/* Botões de Ação baseados no Status */}
                              {result.friendshipStatus === 'accepted' ? (
-                                 <button onClick={() => { if(onChatSelect) onChatSelect(getChatId(user!.id, result.user.id), result.user); setIsAddingFriend(false); }} className="p-2 bg-brand-primary/10 text-brand-primary rounded-full"><MessageCircle size={18} /></button>
+                                 <button onClick={() => { if(onChatSelect) onChatSelect(getChatId(user!.id, result.user.id), result.user); setIsAddingFriend(false); }} className="p-2.5 bg-brand-primary text-zinc-950 rounded-full hover:scale-105 transition-transform"><MessageCircle size={20} /></button>
                              ) : result.friendshipStatus === 'pending' ? (
-                                 <span className="text-[10px] text-zinc-500 bg-zinc-800 px-2 py-1 rounded">Enviado</span>
+                                 <div className="flex items-center gap-1 bg-zinc-800 px-3 py-1.5 rounded-lg border border-zinc-700">
+                                     <UserCheck size={14} className="text-zinc-400" />
+                                     <span className="text-[10px] text-zinc-400 font-medium">Enviado</span>
+                                 </div>
                              ) : (
-                                 <button onClick={() => handleSendRequest(result.user.id)} className="p-2 bg-zinc-100 text-zinc-950 rounded-full hover:scale-105 transition-transform"><UserPlus size={18} /></button>
+                                 <button onClick={() => handleSendRequest(result.user.id)} className="p-2.5 bg-zinc-100 text-zinc-950 rounded-full hover:scale-105 transition-transform shadow-lg shadow-white/5"><UserPlus size={20} /></button>
                              )}
                          </div>
                      ))
@@ -431,7 +489,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                      <div className="text-center py-8 opacity-50"><p className="text-xs text-zinc-500">Sem conversas ativas.</p></div>
                  ) : (
                      chats.map(chat => (
-                        <div key={chat.chatId} onClick={() => openExistingChat(chat)} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4 active:scale-[0.98] transition-all cursor-pointer hover:border-zinc-700">
+                        <div key={chat.chatId} onClick={() => openExistingChat(chat)} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4 active:scale-[0.98] transition-all cursor-pointer hover:border-zinc-700 group">
                             <div className="relative">
                                 {/* Tratamento visual para usuário excluído */}
                                 {chat.otherUser.is_deleted ? (
@@ -446,8 +504,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                                     <h3 className={`text-sm font-semibold truncate ${chat.otherUser.is_deleted ? 'text-zinc-500 italic' : 'text-zinc-200'}`}>{chat.otherUser.name}</h3>
                                     <span className="text-[10px] text-zinc-500 shrink-0">{new Date(chat.lastMessage.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                 </div>
-                                <p className="text-xs text-zinc-400 truncate flex items-center gap-1">{chat.lastMessage.sender_id === user?.id && <span className="text-zinc-500">Você: </span>}{chat.lastMessage.content}</p>
+                                <p className="text-xs text-zinc-400 truncate flex items-center gap-1 group-hover:text-zinc-300 transition-colors">{chat.lastMessage.sender_id === user?.id && <span className="text-zinc-500">Você: </span>}{chat.lastMessage.content}</p>
                             </div>
+                            <ArrowRight size={16} className="text-zinc-700 opacity-0 group-hover:opacity-100 transition-opacity -ml-2" />
                         </div>
                      ))
                  )}

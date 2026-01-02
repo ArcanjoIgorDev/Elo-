@@ -82,6 +82,14 @@ export interface ChatSummary {
   unreadCount: number;
 }
 
+export interface Notification {
+    id: string;
+    type: 'FRIEND_REQUEST' | 'REQUEST_ACCEPTED' | 'REQUEST_REJECTED';
+    user: User;
+    timestamp: string;
+    read: boolean;
+}
+
 export enum AppScreen {
   LOGIN = 'LOGIN',
   HOME = 'HOME',
