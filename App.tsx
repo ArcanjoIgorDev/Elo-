@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
 import LoginScreen from './screens/LoginScreen';
@@ -11,11 +11,88 @@ import { getChatId } from './services/dataService';
 
 const AppContent: React.FC = () => {
   const { user, loading, signOut } = useAuth();
+  
+  // State management aligned with History API
   const [currentScreen, setCurrentScreen] = useState<AppScreen>(AppScreen.HOME);
+  
+  // Chat State
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chatTargetUser, setChatTargetUser] = useState<User | null>(null);
-  const [viewProfileId, setViewProfileId] = useState<string | null>(null);
   const [chatInitialMessage, setChatInitialMessage] = useState<string | undefined>(undefined);
+  
+  // Profile State
+  const [viewProfileId, setViewProfileId] = useState<string | null>(null);
+
+  // --- NAVEGAÇÃO COM BOTÃO VOLTAR FÍSICO ---
+  useEffect(() => {
+    // Ao montar, define o estado inicial no histórico se não existir
+    if (!window.history.state) {
+        window.history.replaceState({ screen: AppScreen.HOME }, '');
+    }
+
+    const handlePopState = (event: PopStateEvent) => {
+        const state = event.state;
+        if (state && state.screen) {
+            // Restaura estados baseados na tela
+            if (state.screen === AppScreen.HOME) {
+                setSelectedChatId(null);
+                setChatTargetUser(null);
+                setViewProfileId(null);
+            }
+            setCurrentScreen(state.screen);
+        } else {
+            // Fallback para Home se não houver estado
+            setCurrentScreen(AppScreen.HOME);
+        }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateTo = (screen: AppScreen, extraState: any = {}) => {
+      // Evita pushState se já estiver na tela (exceto Chat/Profile que podem mudar de ID)
+      const isSameScreen = currentScreen === screen;
+      
+      // Atualiza o estado React
+      setCurrentScreen(screen);
+
+      // Atualiza o Histórico do Navegador
+      window.history.pushState({ screen, ...extraState }, '');
+  };
+
+  const handleOpenChat = (chatId: string, targetUser: User) => {
+      setSelectedChatId(chatId);
+      setChatTargetUser(targetUser);
+      setChatInitialMessage(undefined);
+      navigateTo(AppScreen.CHAT, { chatId });
+  };
+
+  const handleStartChatFromProfile = (targetUser: User, initialContext?: string) => {
+      if (!user) return;
+      const chatId = getChatId(user.id, targetUser.id);
+      setSelectedChatId(chatId);
+      setChatTargetUser(targetUser);
+      setChatInitialMessage(initialContext);
+      navigateTo(AppScreen.CHAT, { chatId });
+  };
+
+  const handleViewProfile = (userId: string) => {
+      setViewProfileId(userId);
+      navigateTo(AppScreen.USER_PROFILE, { userId });
+  };
+
+  const handleNavClick = (screen: AppScreen) => {
+      // Se clicar na tab atual, reseta para a "raiz" daquela tab (ex: fecha modais ou scrolls)
+      // Se for diferente, navega
+      if (screen === AppScreen.HOME) {
+           // Limpa histórico profundo se voltar para home via tab
+           window.history.pushState({ screen: AppScreen.HOME }, '');
+           setCurrentScreen(AppScreen.HOME);
+      } else {
+           navigateTo(screen);
+      }
+  };
 
   if (loading) {
     return (
@@ -29,27 +106,6 @@ const AppContent: React.FC = () => {
     return <LoginScreen />;
   }
 
-  const handleOpenChat = (chatId: string, targetUser: User) => {
-      setSelectedChatId(chatId);
-      setChatTargetUser(targetUser);
-      setChatInitialMessage(undefined); // Limpa contexto anterior
-      setCurrentScreen(AppScreen.CHAT);
-  };
-
-  const handleStartChatFromProfile = (targetUser: User, initialContext?: string) => {
-      if (!user) return;
-      const chatId = getChatId(user.id, targetUser.id);
-      setSelectedChatId(chatId);
-      setChatTargetUser(targetUser);
-      setChatInitialMessage(initialContext);
-      setCurrentScreen(AppScreen.CHAT);
-  };
-
-  const handleViewProfile = (userId: string) => {
-      setViewProfileId(userId);
-      setCurrentScreen(AppScreen.USER_PROFILE);
-  };
-
   // Full screen overrides (no bottom nav)
   if (currentScreen === AppScreen.CHAT && selectedChatId && chatTargetUser) {
     return (
@@ -57,12 +113,7 @@ const AppContent: React.FC = () => {
             chatId={selectedChatId} 
             targetUser={chatTargetUser}
             initialMessage={chatInitialMessage}
-            onBack={() => {
-                setSelectedChatId(null);
-                setChatTargetUser(null);
-                setChatInitialMessage(undefined);
-                setCurrentScreen(AppScreen.HOME);
-            }} 
+            onBack={() => window.history.back()} 
         />
     );
   }
@@ -71,7 +122,7 @@ const AppContent: React.FC = () => {
       return (
           <ProfileScreen 
             targetUserId={viewProfileId}
-            onBack={() => setCurrentScreen(AppScreen.HOME)}
+            onBack={() => window.history.back()}
             onSignOut={() => {}}
             onStartChat={handleStartChatFromProfile}
           />
@@ -80,9 +131,9 @@ const AppContent: React.FC = () => {
 
   if (currentScreen === AppScreen.PROFILE) {
       return (
-          <Layout activeScreen={AppScreen.PROFILE} onNavigate={setCurrentScreen}>
+          <Layout activeScreen={AppScreen.PROFILE} onNavigate={handleNavClick}>
             <ProfileScreen 
-                onBack={() => setCurrentScreen(AppScreen.HOME)}
+                onBack={() => handleNavClick(AppScreen.HOME)}
                 onSignOut={signOut}
                 onStartChat={handleStartChatFromProfile}
             />
@@ -91,10 +142,10 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <Layout activeScreen={currentScreen} onNavigate={setCurrentScreen}>
+    <Layout activeScreen={currentScreen} onNavigate={handleNavClick}>
       {currentScreen === AppScreen.HOME && (
           <HomeScreen 
-            onNavigate={setCurrentScreen} 
+            onNavigate={handleNavClick} 
             onChatSelect={handleOpenChat} 
             onViewProfile={handleViewProfile}
           />

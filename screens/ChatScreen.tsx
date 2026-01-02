@@ -1,21 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Send, MoreVertical, ShieldCheck, Thermometer, MapPin, Check, CheckCheck, Loader2, Navigation, Ban, AlertTriangle, Paperclip, Image as ImageIcon, Mic, Camera } from 'lucide-react';
+import { ArrowLeft, Send, MoreVertical, MapPin, Check, CheckCheck, Navigation, Ban, AlertTriangle, Paperclip, Image as ImageIcon, Mic, Sparkles } from 'lucide-react';
 import { Message, User, MessageType } from '../types';
 import { fetchMessages, sendMessage, markMessagesAsRead, getUserProfile } from '../services/dataService';
-import { analyzeConversationEmotion } from '../services/aiService';
+import { analyzeConversationEmotion, EmotionType } from '../services/aiService';
 import { useAuth } from '../context/AuthContext';
 
 interface ChatScreenProps {
   chatId: string;
   targetUser: User;
-  initialMessage?: string; // Novo Prop
+  initialMessage?: string; 
   onBack: () => void;
 }
 
 const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMessage, onBack }) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState(initialMessage || ''); // Inicializa com o contexto se houver
+  const [inputText, setInputText] = useState(initialMessage || ''); 
   const [loading, setLoading] = useState(true);
   
   // Status da Conexão
@@ -30,8 +30,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
   // Toast State
   const [toastMessage, setToastMessage] = useState<{type: 'error' | 'success', text: string} | null>(null);
   
-  // AI State
-  const [emotion, setEmotion] = useState({ tone: 'Conectando...', intensity: 0 });
+  // AI State - Dual Emotion
+  const [partnerEmotion, setPartnerEmotion] = useState<{ tone: EmotionType, intensity: number }>({ tone: 'Neutro', intensity: 0 });
+  const [myEmotion, setMyEmotion] = useState<{ tone: EmotionType, intensity: number }>({ tone: 'Neutro', intensity: 0 });
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -48,7 +49,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
         scrollToBottom();
         markMessagesAsRead(chatId, user.id);
         if(data.length > 0) runEmotionAnalysis(data);
-        else setEmotion({ tone: 'Vazio', intensity: 0 });
     });
 
     // 2. Verificar Status de Bloqueio
@@ -61,7 +61,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
         }
     });
     
-    // Foca no input se houver mensagem inicial
     if (initialMessage && inputRef.current) {
         setTimeout(() => inputRef.current?.focus(), 500);
     }
@@ -84,9 +83,11 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
   }, [toastMessage]);
 
   const runEmotionAnalysis = async (msgs: Message[]) => {
+      if (!user) return;
       setIsAnalyzing(true);
-      const result = await analyzeConversationEmotion(msgs);
-      setEmotion(result);
+      const result = await analyzeConversationEmotion(msgs, user.id);
+      setPartnerEmotion(result.partnerEmotion);
+      setMyEmotion(result.myEmotion);
       setIsAnalyzing(false);
   };
 
@@ -100,11 +101,9 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
     if (isBlocked || !user) return;
     if (type === 'text' && !content.trim()) return;
     
-    // Reset inputs
     if(type === 'text') setInputText('');
     setShowAttachments(false);
 
-    // Optimistic Update
     const optimisticMsg: Message = {
         id: 'temp-' + Date.now(),
         sender_id: user.id,
@@ -163,10 +162,16 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
     );
   };
 
-  const getIntensityColor = (intensity: number) => {
-      if (intensity < 30) return 'text-zinc-400';
-      if (intensity < 60) return 'text-brand-primary';
-      return 'text-red-400';
+  const getEmotionColor = (tone: EmotionType) => {
+      switch(tone) {
+          case 'Alegre': return 'text-yellow-400';
+          case 'Tenso': return 'text-red-400';
+          case 'Apaixonado': return 'text-pink-400';
+          case 'Empático': return 'text-green-400';
+          case 'Reflexivo': return 'text-blue-400';
+          case 'Entusiasmado': return 'text-orange-400';
+          default: return 'text-zinc-400';
+      }
   };
 
   return (
@@ -184,7 +189,7 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
       {/* Header */}
       <header className="flex items-center justify-between px-4 py-4 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-900 sticky top-0 z-20 shrink-0">
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-2 -ml-2 text-zinc-400 hover:text-zinc-100">
+          <button onClick={onBack} className="p-2 -ml-2 text-zinc-400 hover:text-zinc-100 active:scale-95 transition-transform">
             <ArrowLeft size={20} />
           </button>
           <div className="flex items-center gap-3">
@@ -193,22 +198,32 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
                     <Ban size={18} className="text-zinc-500"/>
                 </div>
             ) : (
-                <img 
-                    src={targetUser.avatar_url || `https://ui-avatars.com/api/?name=${targetUser.name}&background=random`} 
-                    className="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-800 object-cover" 
-                    alt="Avatar" 
-                />
+                <div className="relative">
+                    <img 
+                        src={targetUser.avatar_url || `https://ui-avatars.com/api/?name=${targetUser.name}&background=random`} 
+                        className="w-10 h-10 rounded-full border border-zinc-700 bg-zinc-800 object-cover" 
+                        alt="Avatar" 
+                    />
+                    {/* Partner Emotion Badge (Small dot/icon) */}
+                    {!isAnalyzing && partnerEmotion.tone !== 'Neutro' && (
+                        <div className={`absolute -bottom-1 -right-1 bg-zinc-900 rounded-full p-1 border border-zinc-800 ${getEmotionColor(partnerEmotion.tone)} animate-bounce`}>
+                            <Sparkles size={8} className="fill-current" />
+                        </div>
+                    )}
+                </div>
             )}
             <div>
               <h2 className={`text-sm font-bold ${targetUser.is_deleted ? 'text-zinc-500 italic' : 'text-zinc-100'}`}>
                   {targetUser.is_deleted ? 'Usuário Excluído' : targetUser.name}
               </h2>
               {!targetUser.is_deleted && (
-                  <div className="flex items-center gap-1.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${emotion.intensity > 50 ? 'bg-brand-primary' : 'bg-zinc-500'} animate-pulse`}></span>
-                    <span className="text-[10px] text-zinc-400 font-medium tracking-wide">
-                        {isAnalyzing ? 'Analisando...' : emotion.tone}
+                  <div className="flex items-center gap-1.5 transition-all">
+                    <span className={`text-[10px] font-medium tracking-wide ${getEmotionColor(partnerEmotion.tone)}`}>
+                        {isAnalyzing ? 'Interpretando...' : partnerEmotion.tone === 'Neutro' ? 'Neutro' : `Vibe: ${partnerEmotion.tone}`}
                     </span>
+                    <div className="h-1 w-8 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className={`h-full transition-all duration-1000 ${getEmotionColor(partnerEmotion.tone).replace('text-', 'bg-')}`} style={{width: `${partnerEmotion.intensity}%`}}></div>
+                    </div>
                   </div>
               )}
             </div>
@@ -227,17 +242,6 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
                     <Ban size={14} className="text-red-400" />
                     <span className="text-xs text-zinc-400">
                         {blockedByMe ? "Você bloqueou este contato." : "Você não pode responder a esta conversa."}
-                    </span>
-                </div>
-            </div>
-        )}
-
-        {messages.length > 5 && (
-            <div className="flex justify-center my-6">
-                <div className="bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 flex items-center gap-2 shadow-sm animate-fade-in">
-                    <Thermometer size={12} className={getIntensityColor(emotion.intensity)} />
-                    <span className={`text-[10px] uppercase tracking-wider font-semibold ${getIntensityColor(emotion.intensity)}`}>
-                        IA Contexto: {emotion.tone} ({emotion.intensity}%)
                     </span>
                 </div>
             </div>
@@ -318,10 +322,19 @@ const ChatScreen: React.FC<ChatScreenProps> = ({ chatId, targetUser, initialMess
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area - Desativada se Bloqueado ou Usuário Deletado */}
+      {/* Input Area - Com indicador do MEU humor */}
       {!isBlocked && !targetUser.is_deleted && (
-          <div className="p-3 bg-zinc-950/90 backdrop-blur-md border-t border-zinc-900 pb-safe shrink-0">
+          <div className="p-3 bg-zinc-950/90 backdrop-blur-md border-t border-zinc-900 pb-safe shrink-0 flex flex-col gap-2">
              
+             {/* My Emotion Indicator (Subtle) */}
+             {myEmotion.tone !== 'Neutro' && (
+                 <div className="flex justify-end px-2">
+                     <span className={`text-[9px] font-medium tracking-wide flex items-center gap-1 ${getEmotionColor(myEmotion.tone)} opacity-60`}>
+                         Você parece: {myEmotion.tone}
+                     </span>
+                 </div>
+             )}
+
              {/* Attachments Menu */}
              {showAttachments && (
                  <div className="absolute bottom-20 left-4 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl p-3 flex gap-4 animate-fade-in z-30">
