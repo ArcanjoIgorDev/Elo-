@@ -2,8 +2,10 @@
 import { Message } from "../types";
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Inicializa o cliente GenAI (assumindo que process.env.API_KEY está disponível)
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Inicializa o cliente GenAI de forma segura.
+// Se a chave não existir (ex: deploy sem env var configurada), usa uma string vazia para não crashar o app no load.
+const apiKey = (typeof process !== 'undefined' && process.env && process.env.API_KEY) ? process.env.API_KEY : '';
+const ai = new GoogleGenAI({ apiKey });
 
 // Tipos de emoção expandidos para maior granularidade
 export type EmotionType = 
@@ -20,6 +22,7 @@ interface AnalysisResult {
 
 export const suggestLocations = async (query: string): Promise<string[]> => {
     if (!query || query.length < 3) return [];
+    if (!apiKey) { console.warn("API_KEY não configurada"); return []; }
 
     try {
         const response = await ai.models.generateContent({
@@ -49,6 +52,8 @@ export const suggestLocations = async (query: string): Promise<string[]> => {
 };
 
 export const geocodeLocation = async (locationString: string): Promise<{ latitude: number, longitude: number } | null> => {
+    if (!apiKey) return null;
+
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
@@ -80,7 +85,7 @@ export const geocodeLocation = async (locationString: string): Promise<{ latitud
 // --- ANÁLISE DE EMOÇÃO EXISTENTE ---
 
 export const analyzeConversationEmotion = async (messages: Message[], currentUserId: string): Promise<AnalysisResult> => {
-  // Simulação rápida de processamento (local)
+  // Simulação rápida de processamento (local) para não depender sempre da API em interações rápidas
   await new Promise(resolve => setTimeout(resolve, 150));
 
   if (messages.length === 0) {
@@ -107,7 +112,7 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
 
       const text = textMsgs.map(m => m.content.toLowerCase()).join(' ');
       
-      // Dicionário Expandido 2.0
+      // Dicionário Expandido 2.0 (Local NLP Heuristics)
       const dictionary: Record<string, string[]> = {
           alegre: ['kkk', 'haha', 'lol', 'rs', 'legal', 'top', 'bom', 'ótimo', 'maravilha', 'show', 'feliz', 'sorrir', 'animado', 'boas', 'hehe', '😂', '😁', 'gostei'],
           reflexivo: ['hmm', 'será', 'acho', 'talvez', 'pensando', 'vida', 'tempo', 'difícil', 'triste', 'pena', 'sinto', 'calma', '...', 'profundo', 'sentido', '🤔'],
@@ -119,7 +124,7 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
           ansioso: ['medo', 'preocupado', 'e agora', 'rápido', 'nervoso', 'tenso', 'socorro', '😰', '😬'],
           grato: ['obrigado', 'valeu', 'agradeço', 'gratidão', 'deus abençoe', 'salvou', '🙏', '✨'],
           curioso: ['como', 'onde', 'quando', 'quem', 'explica', 'sério', 'olha', 'interessante', '👀', 'conta mais'],
-          ironico: ['claro que sim', 'super', 'aham ta', 'nossa', 'parabens', 'ajudou muito', '😒'] // Difícil detectar sem NLP real, heurística básica
+          ironico: ['claro que sim', 'super', 'aham ta', 'nossa', 'parabens', 'ajudou muito', '😒']
       };
 
       const scores: Record<string, number> = {};
@@ -127,24 +132,20 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
       Object.entries(dictionary).forEach(([key, words]) => {
           let count = 0;
           words.forEach(w => {
-               // Regex para match exato da palavra ou emoji
                const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                const regex = new RegExp(w.match(/\p{Emoji}/u) ? escaped : `\\b${escaped}\\b`, 'giu');
                
                const matches = text.match(regex);
                if (matches) {
                    count += matches.length;
-                   // Bônus de pontuação para palavras no final da frase
                    if (new RegExp(`${escaped}[!.?]`, 'i').test(text)) count += 0.5;
                }
           });
           
-          // Heurística de CAPS LOCK para Tensão/Entusiasmo
           if ((key === 'tenso' || key === 'entusiasmado') && textMsgs.some(m => m.content === m.content.toUpperCase() && m.content.length > 5)) {
               count += 2;
           }
 
-          // Heurística de Exclamação
           if ((key === 'entusiasmado' || key === 'alegre') && text.includes('!!')) {
               count += 1;
           }
@@ -162,7 +163,6 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
           }
       });
 
-      // Mapeamento para Tipos Fortes
       const map: Record<string, EmotionType> = {
           alegre: 'Alegre',
           reflexivo: 'Reflexivo',
@@ -180,11 +180,9 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
 
       const tone = map[winnerKey] || 'Neutro';
       
-      // Intensidade baseada no score relativo ao tamanho das mensagens
       const msgCount = msgs.length;
       let intensity = Math.min(100, (maxScore / Math.max(1, msgCount * 0.5)) * 100);
       
-      // Normalização: Se tem poucas mensagens mas muito score, é intenso
       if (maxScore > 3) intensity = Math.max(intensity, 60);
       if (winnerKey === 'neutro') intensity = 0;
 

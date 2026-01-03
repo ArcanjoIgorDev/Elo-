@@ -28,26 +28,30 @@ const MapScreen: React.FC<MapScreenProps> = ({ onBack, onViewProfile }) => {
   useEffect(() => {
       // Inicializa o Mapa apenas uma vez
       if (mapContainerRef.current && !mapInstanceRef.current) {
-          const map = L.map(mapContainerRef.current, {
-              zoomControl: false, 
-              attributionControl: false,
-              center: [-14.2350, -51.9253], // Centro do Brasil Default
-              zoom: 4,
-              minZoom: 3,
-              maxZoom: 18,
-              zoomAnimation: true
-          });
+          try {
+              const map = L.map(mapContainerRef.current, {
+                  zoomControl: false, 
+                  attributionControl: false,
+                  center: [-14.2350, -51.9253], // Centro do Brasil Default
+                  zoom: 4,
+                  minZoom: 3,
+                  maxZoom: 18,
+                  zoomAnimation: true
+              });
 
-          // Adiciona Camada de Tiles Hacker
-          L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-              className: 'hacker-map-tiles', // CSS Class definida no index.html
-              subdomains: 'abcd',
-              maxZoom: 20
-          }).addTo(map);
+              // Adiciona Camada de Tiles Hacker
+              L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                  className: 'hacker-map-tiles', // CSS Class definida no index.html
+                  subdomains: 'abcd',
+                  maxZoom: 20
+              }).addTo(map);
 
-          mapInstanceRef.current = map;
-          friendsLayerRef.current = L.layerGroup().addTo(map);
-          linesLayerRef.current = L.layerGroup().addTo(map);
+              mapInstanceRef.current = map;
+              friendsLayerRef.current = L.layerGroup().addTo(map);
+              linesLayerRef.current = L.layerGroup().addTo(map);
+          } catch (e) {
+              console.error("Erro ao inicializar mapa Leaflet:", e);
+          }
       }
 
       // Prioridade: Localização do DB > GPS
