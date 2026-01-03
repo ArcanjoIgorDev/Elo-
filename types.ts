@@ -20,7 +20,7 @@ export interface Message {
   id: string;
   sender_id: string | null;
   content: string;
-  media_url?: string; // Novo campo para URL do storage
+  media_url?: string; 
   type?: MessageType;
   created_at: string;
   is_read: boolean;
@@ -40,7 +40,7 @@ export interface Pulse {
   user_name: string;
   user_avatar: string;
   content_type: 'text' | 'image' | 'video';
-  content: string; // URL ou Texto
+  content: string; 
   description?: string;
   emotional_state?: EmotionalState;
   created_at: string;
@@ -52,8 +52,6 @@ export interface PulseReactionCounts {
   fire: number;
 }
 
-// --- NOVOS TIPOS PARA O FEED ---
-
 export interface Post {
     id: string;
     user: User;
@@ -64,7 +62,7 @@ export interface Post {
     likes_count: number;
     comments_count: number;
     created_at: string;
-    liked_by_me?: boolean; // Campo virtual para UI
+    liked_by_me?: boolean;
 }
 
 export interface PostComment {
@@ -73,9 +71,9 @@ export interface PostComment {
     user: User;
     content: string;
     created_at: string;
+    likes_count: number;
+    liked_by_me?: boolean;
 }
-
-// ------------------------------
 
 export interface Topic {
     id: string;
@@ -125,12 +123,15 @@ export interface ChatSummary {
   isNewConnection?: boolean;
 }
 
+export type NotificationType = 'FRIEND_REQUEST' | 'REQUEST_ACCEPTED' | 'POST_LIKE' | 'COMMENT_LIKE' | 'MENTION' | 'COMMENT_REPLY';
+
 export interface Notification {
     id: string;
-    type: 'FRIEND_REQUEST' | 'REQUEST_ACCEPTED' | 'REQUEST_REJECTED';
-    user: User;
+    type: NotificationType;
+    user: User; // Quem gerou a notificação
     timestamp: string;
     read: boolean;
+    entity_id?: string; // ID do post ou comentário
 }
 
 export enum AppScreen {

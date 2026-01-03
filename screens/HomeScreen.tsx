@@ -1,10 +1,10 @@
 
-import React, { useEffect, useState, useRef } from 'react';
-import { fetchPulses, createPulse, fetchUserChats, searchUsers, getChatId, sendFriendRequest, fetchNotifications, respondToFriendRequest, fetchFeed, createPost, clearNotification } from '../services/dataService';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { fetchPulses, createPulse, fetchUserChats, searchUsers, getChatId, sendFriendRequest, fetchNotifications, respondToFriendRequest, fetchFeed, createPost, clearNotification, markAllNotificationsRead, getUserProfile } from '../services/dataService';
 import { Pulse, AppScreen, ChatSummary, User, EmotionalState, Notification, Post } from '../types';
 import PulseCard from '../components/PulseCard';
 import PostCard from '../components/PostCard';
-import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Video as VideoIcon, Smile, Bell, Filter, Ghost, Users, Hexagon, Check, UserIcon, Edit3, Share2, Copy } from 'lucide-react';
+import { Plus, Search, X, MessageCircle, Zap, Send, UserPlus, Loader2, Image as ImageIcon, Video as VideoIcon, Smile, Bell, Ghost, Users, Hexagon, Check, UserIcon, Edit3, Share2, Copy } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface HomeScreenProps {
@@ -22,11 +22,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [feed, setFeed] = useState<Post[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const [loading, setLoading] = useState(true);
   
   // UI States
   const [activeTab, setActiveTab] = useState<'feed' | 'chats'>('feed');
-  const [isZenMode, setIsZenMode] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   
   // Creation & Action Menu States
@@ -80,9 +80,34 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
     setPulses(p);
     setChats(c);
     setNotifications(n);
+    setUnreadNotifCount(n.filter(notif => !notif.read).length);
     setFeed(f);
     setLoading(false);
   };
+
+  const handleOpenNotifications = async () => {
+      setIsNotificationsOpen(true);
+      // Mark as read immediately on open
+      if (unreadNotifCount > 0 && user) {
+          await markAllNotificationsRead(user.id);
+          setUnreadNotifCount(0);
+          // Otimistic local update
+          setNotifications(prev => prev.map(n => ({...n, read: true})));
+      }
+  };
+
+  const handleMentionClick = useCallback(async (username: string) => {
+      // Find user by username
+      if (user) {
+          const results = await searchUsers(username, user.id);
+          if (results.length > 0) {
+              const target = results[0].user;
+              if (onViewProfile) onViewProfile(target.id);
+          } else {
+              showToast("Usuário não encontrado.");
+          }
+      }
+  }, [user, onViewProfile]);
 
   const resetCreation = () => {
       setContent('');
@@ -123,13 +148,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       refreshData();
   };
 
-  const activeChats = chats.filter(c => {
-      if (isZenMode) return c.unreadCount > 0; // Zen: Só mostra não lidos
-      return true;
-  });
-
   return (
-    <div className={`pb-24 h-full flex flex-col bg-zinc-950 relative transition-colors duration-700 ${isZenMode ? 'bg-[#0a0a0c]' : ''}`}>
+    <div className="pb-24 h-full flex flex-col bg-zinc-950 relative transition-colors duration-700">
       
       {toastMessage && (
           <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[70] bg-white text-zinc-950 px-6 py-3 rounded-full shadow-xl font-bold text-xs animate-fade-in flex items-center gap-2 border border-white/50 backdrop-blur-md">
@@ -146,11 +166,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
              <h1 className="text-xl font-bold text-white tracking-tight">ELO</h1>
           </div>
           <div className="flex items-center gap-3">
-             <button onClick={() => setIsZenMode(!isZenMode)} className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all ${isZenMode ? 'bg-indigo-500/20 border-indigo-500 text-indigo-400' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}><Filter size={18} /></button>
+             {/* Filter button removed from here */}
              <button onClick={() => setIsAddingFriend(true)} className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white"><UserPlus size={18} /></button>
-             <button onClick={() => setIsNotificationsOpen(true)} className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white relative">
+             <button onClick={handleOpenNotifications} className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white relative">
                 <Bell size={18} />
-                {notifications.length > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-brand-primary rounded-full"></span>}
+                {unreadNotifCount > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-brand-primary rounded-full"></span>}
             </button>
             <button onClick={() => onNavigate(AppScreen.PROFILE)} className="w-10 h-10 rounded-full overflow-hidden border border-zinc-800"><img src={user?.avatar_url} className="w-full h-full object-cover" /></button>
           </div>
@@ -191,6 +211,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                         post={post} 
                         currentUser={user!} 
                         onProfileClick={(uid) => onViewProfile && onViewProfile(uid)}
+                        onMentionClick={handleMentionClick}
                         onDelete={(id) => setFeed(prev => prev.filter(p => p.id !== id))}
                     />
                 ))}
@@ -198,8 +219,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
               </>
           ) : (
               <div className="space-y-3">
-                  {activeChats.length === 0 ? <div className="text-center py-20 text-zinc-600 text-xs">Nenhuma conversa ativa.</div> : 
-                  activeChats.map(chat => (
+                  {chats.length === 0 ? <div className="text-center py-20 text-zinc-600 text-xs">Nenhuma conversa ativa.</div> : 
+                  chats.map(chat => (
                       <div key={chat.chatId} onClick={() => onChatSelect && onChatSelect(chat.chatId, chat.otherUser)} className="bg-zinc-900/40 border border-zinc-800/50 rounded-2xl p-4 flex items-center gap-4 cursor-pointer hover:bg-zinc-900">
                            <img src={chat.otherUser.avatar_url} className="w-12 h-12 rounded-full object-cover" />
                            <div className="flex-1 min-w-0">
@@ -252,7 +273,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                     autoFocus
                     value={content}
                     onChange={(e) => setContent(e.target.value)}
-                    placeholder={isCreatingPulse ? "Compartilhe um momento..." : "Escreva algo permanente..."}
+                    placeholder={isCreatingPulse ? "Compartilhe um momento..." : "Escreva algo permanente (use @ para marcar)..."}
                     className="w-full bg-transparent text-xl text-white placeholder-zinc-700 outline-none resize-none mb-4"
                   />
                   
@@ -338,10 +359,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
              <div className="flex-1 overflow-y-auto space-y-4">
                  {notifications.length === 0 && <p className="text-zinc-600 text-center mt-10">Tudo limpo.</p>}
                  {notifications.map(n => (
-                     <div key={n.id} className="bg-zinc-900/80 p-4 rounded-2xl flex items-center gap-4">
-                         <img src={n.user.avatar_url} className="w-10 h-10 rounded-full" />
+                     <div key={n.id} className="bg-zinc-900/80 p-4 rounded-2xl flex items-center gap-4 border border-zinc-800/50">
+                         <img src={n.user.avatar_url} className="w-10 h-10 rounded-full bg-zinc-800 object-cover" />
                          <div className="flex-1">
-                             <p className="text-sm text-zinc-200"><span className="font-bold">{n.user.name}</span> {n.type === 'FRIEND_REQUEST' ? 'quer conectar' : 'aceitou seu pedido'}.</p>
+                             <p className="text-sm text-zinc-200">
+                                 <span className="font-bold">{n.user.name}</span>{' '}
+                                 {n.type === 'FRIEND_REQUEST' && 'quer conectar.'}
+                                 {n.type === 'REQUEST_ACCEPTED' && 'aceitou seu pedido.'}
+                                 {n.type === 'POST_LIKE' && 'curtiu sua publicação.'}
+                                 {n.type === 'COMMENT_LIKE' && 'curtiu seu comentário.'}
+                                 {n.type === 'MENTION' && 'mencionou você.'}
+                                 {n.type === 'COMMENT_REPLY' && 'comentou na sua publicação.'}
+                             </p>
                          </div>
                          {n.type === 'FRIEND_REQUEST' ? (
                              <div className="flex gap-2">

@@ -1,8 +1,5 @@
 
-// Base de dados local otimizada para busca de cidades
-// Em um app real, isso poderia ser um JSON de 200kb carregado sob demanda ou uma tabela no Supabase.
-// Aqui colocaremos as principais capitais e algumas cidades para exemplo do algoritmo determinístico.
-
+// Base de dados expandida (~400 cidades principais)
 const BRAZIL_CITIES = [
   "São Paulo - SP", "Rio de Janeiro - RJ", "Belo Horizonte - MG", "Brasília - DF",
   "Salvador - BA", "Fortaleza - CE", "Curitiba - PR", "Manaus - AM", "Recife - PE",
@@ -32,21 +29,59 @@ const BRAZIL_CITIES = [
   "Itapevi - SP", "Sete Lagoas - MG", "Divinópolis - MG", "Marília - SP", "Araraquara - SP",
   "São Leopoldo - RS", "Rondonópolis - MT", "Hortolândia - SP", "Jacareí - SP", "Presidente Prudente - SP",
   "Arapiraca - AL", "Cabo Frio - RJ", "Maracanaú - CE", "Dourados - MS", "Chapecó - SC",
-  "Itajaí - SC", "Rio Grande - RS", "Rio Verde - GO"
+  "Itajaí - SC", "Rio Grande - RS", "Rio Verde - GO", "Boa Vista - RR", "Palmas - TO",
+  "Balneário Camboriú - SC", "Gramado - RS", "Campos do Jordão - SP", "Ouro Preto - MG",
+  "Paraty - RJ", "Búzios - RJ", "Ilhabela - SP", "Porto Seguro - BA", "Jericoacoara - CE",
+  "Juiz de Fora - MG", "Macapá - AP", "Anápolis - GO", "Caxias - MA", "Sobral - CE",
+  "Rio Claro - SP", "Araçatuba - SP", "Santa Bárbara d'Oeste - SP", "Ferraz de Vasconcelos - SP",
+  "Ilhéus - BA", "Araguaína - TO", "Luziânia - GO", "Castanhal - PA", "Angra dos Reis - RJ",
+  "Trindade - GO", "Cachoeiro de Itapemirim - ES", "Passo Fundo - RS", "Sinop - MT",
+  "Guarapuava - PR", "Jaraguá do Sul - SC", "Resende - RJ", "Itapetininga - SP",
+  "Itapecerica da Serra - SP", "Alvorada - RS", "Marituba - PA", "Parnaíba - PI",
+  "Cabo de Santo Agostinho - PE", "Abaetetuba - PA", "Camaragibe - PE", "Sertãozinho - SP",
+  "Valinhos - SP", "Barretos - SP", "Araras - SP", "Pindamonhangaba - SP", "Mogi Guaçu - SP",
+  "Itabuna - BA", "Linhares - ES", "São Caetano do Sul - SP", "Bragança Paulista - SP",
+  "Birigui - SP", "Catanduva - SP", "Barbacena - MG", "Teresópolis - RJ", "Varginha - MG",
+  "Conselheiro Lafaiete - MG", "Poços de Caldas - MG", "Ibirité - MG", "Araruama - RJ",
+  "Barra Mansa - RJ", "Macaé - RJ", "Queimados - RJ", "Nilópolis - RJ", "Mesquita - RJ",
+  "Jequié - BA", "Alagoinhas - BA", "Barreiras - BA", "Teixeira de Freitas - BA",
+  "Patos - PB", "Crato - CE", "Itapipoca - CE", "Timon - MA", "São José de Ribamar - MA",
+  "Dourados - MS", "Três Lagoas - MS", "Corumbá - MS", "Ji-Paraná - RO", "Ariquemes - RO",
+  "Vilhena - RO", "Parintins - AM", "Itacoatiara - AM", "Manacapuru - AM", "Santana - AP",
+  "Laranjal do Jari - AP", "Gurupi - TO", "Araguatins - TO", "Paraíso do Tocantins - TO",
+  "Pato Branco - PR", "Toledo - PR", "Apucarana - PR", "Pinhais - PR", "Araucária - PR",
+  "Campo Largo - PR", "Umuarama - PR", "Paranaguá - PR", "Criciúma - SC", "Lages - SC",
+  "Palhoça - SC", "Brusque - SC", "Tubarão - SC", "São Bento do Sul - SC", "Caçador - SC",
+  "Concórdia - SC", "Bagé - RS", "Uruguaiana - RS", "Bento Gonçalves - RS", "Erechim - RS",
+  "Santa Cruz do Sul - RS", "Cachoeirinha - RS", "Sapucaia do Sul - RS", "Lajeado - RS"
 ];
 
-// Algoritmo determinístico de busca
+// Algoritmo de busca otimizado
 export const searchCities = (query: string): string[] => {
+    if (!query || query.length < 2) return [];
+
     const normalizedQuery = query.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     
-    return BRAZIL_CITIES.filter(city => {
+    // Filtra e classifica
+    const matches = BRAZIL_CITIES.map(city => {
         const normalizedCity = city.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        return normalizedCity.includes(normalizedQuery);
-    }).slice(0, 5); // Retorna top 5
+        let score = 0;
+
+        if (normalizedCity === normalizedQuery) score = 100; // Match exato
+        else if (normalizedCity.startsWith(normalizedQuery)) score = 50; // Começa com
+        else if (normalizedCity.includes(normalizedQuery)) score = 10; // Contém
+        
+        return { city, score };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score) 
+    .map(item => item.city)
+    .slice(0, 10); // Aumentado para 10 sugestões
+
+    return matches;
 };
 
-// Mock de coordenadas para algumas capitais (para o mapa funcionar sem API externa)
-// Em produção, isso seria uma tabela no Supabase com lat/lng de todas as cidades
+// Coordenadas das capitais e principais cidades (Fallback rápido)
 const CITY_COORDS: Record<string, {lat: number, lng: number}> = {
     "São Paulo - SP": { lat: -23.5505, lng: -46.6333 },
     "Rio de Janeiro - RJ": { lat: -22.9068, lng: -43.1729 },
@@ -58,6 +93,23 @@ const CITY_COORDS: Record<string, {lat: number, lng: number}> = {
     "Recife - PE": { lat: -8.0476, lng: -34.8770 },
     "Porto Alegre - RS": { lat: -30.0346, lng: -51.2177 },
     "Fortaleza - CE": { lat: -3.7172, lng: -38.5434 },
+    "Belém - PA": { lat: -1.4558, lng: -48.4902 },
+    "Goiânia - GO": { lat: -16.6869, lng: -49.2648 },
+    "Florianópolis - SC": { lat: -27.5954, lng: -48.5480 },
+    "Vitória - ES": { lat: -20.3155, lng: -40.3128 },
+    "Natal - RN": { lat: -5.7945, lng: -35.2110 },
+    "Campo Grande - MS": { lat: -20.4697, lng: -54.6201 },
+    "Cuiabá - MT": { lat: -15.6014, lng: -56.0979 },
+    "João Pessoa - PB": { lat: -7.1195, lng: -34.8450 },
+    "Maceió - AL": { lat: -9.6662, lng: -35.7351 },
+    "São Luís - MA": { lat: -2.5307, lng: -44.3068 },
+    "Teresina - PI": { lat: -5.0919, lng: -42.8034 },
+    "Aracaju - SE": { lat: -10.9472, lng: -37.0731 },
+    "Palmas - TO": { lat: -10.2128, lng: -48.3603 },
+    "Porto Velho - RO": { lat: -8.7619, lng: -63.9039 },
+    "Boa Vista - RR": { lat: 2.8235, lng: -60.6758 },
+    "Rio Branco - AC": { lat: -9.9754, lng: -67.8249 },
+    "Macapá - AP": { lat: 0.0355, lng: -51.0705 }
 };
 
 export const getCityCoordinates = async (cityName: string): Promise<{latitude: number, longitude: number} | null> => {
@@ -66,8 +118,7 @@ export const getCityCoordinates = async (cityName: string): Promise<{latitude: n
         return { latitude: CITY_COORDS[cityName].lat, longitude: CITY_COORDS[cityName].lng };
     }
     
-    // 2. Se não achar, usa um fallback genérico ou uma API pública gratuita (OpenStreetMap Nominatim)
-    // Para manter "sem API Key", usamos Nominatim que é open source e free (com rate limit)
+    // 2. Fallback Nominatim (OpenStreetMap)
     try {
         const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(cityName)}, Brazil`);
         const data = await response.json();
