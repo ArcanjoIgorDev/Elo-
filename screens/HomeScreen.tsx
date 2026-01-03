@@ -18,7 +18,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [friendCount, setFriendCount] = useState(0);
   
   // INOVAÇÃO: Zen Mode (Filtra ruído)
   const [isZenMode, setIsZenMode] = useState(false);
@@ -55,12 +54,29 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
 
   useEffect(() => {
     if (user) {
-        refreshData();
-        const interval = setInterval(() => {
-            fetchNotifications(user.id).then(setNotifications);
-            fetchUserChats(user.id).then(setChats);
-        }, 5000); 
-        return () => clearInterval(interval);
+        // Carregamento inicial (Força refresh apenas no mount se necessário)
+        refreshData(false);
+        
+        let isMounted = true;
+        let timeoutId: any;
+
+        const pollData = async () => {
+            if (!isMounted) return;
+            // Polling suave: usa cache se disponível, não força rede
+            await Promise.all([
+                fetchNotifications(user.id).then(d => isMounted && setNotifications(d)),
+                fetchUserChats(user.id).then(d => isMounted && setChats(d))
+            ]);
+            // Re-agenda polling para 10s APÓS o término da requisição anterior (evita congestionamento)
+            timeoutId = setTimeout(pollData, 10000);
+        };
+
+        timeoutId = setTimeout(pollData, 10000); // Primeiro delay
+
+        return () => {
+            isMounted = false;
+            if (timeoutId) clearTimeout(timeoutId);
+        };
     }
   }, [user]);
 
@@ -79,22 +95,23 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
 
   const showToast = (msg: string) => setToastMessage(msg);
 
-  const refreshData = () => {
+  const refreshData = async (force = false) => {
+    if(!user) return;
     setLoading(true);
-    Promise.all([
-        fetchPulses(),
-        fetchUserChats(user!.id),
-        fetchNotifications(user!.id),
-        fetchDailyTopic(),
-        getFriendsCount(user!.id)
-    ]).then(([pulsesData, chatsData, notifData, topicData, count]) => {
-        setPulses(pulsesData);
-        setChats(chatsData);
-        setNotifications(notifData);
-        if(topicData) setDailyTopic(topicData.title);
-        setFriendCount(count);
-        setLoading(false);
-    });
+    
+    // Promise.all para paralelizar
+    const [pulsesData, chatsData, notifData, topicData] = await Promise.all([
+        fetchPulses(force),
+        fetchUserChats(user.id, force),
+        fetchNotifications(user.id, force),
+        fetchDailyTopic()
+    ]);
+
+    setPulses(pulsesData);
+    setChats(chatsData);
+    setNotifications(notifData);
+    if(topicData) setDailyTopic(topicData.title);
+    setLoading(false);
   };
 
   const removePulseFromList = (pulseId: string) => {
@@ -139,7 +156,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
     setPulseImage(null);
     setPulseEmotion('neutro');
     showToast("Vibe compartilhada!");
-    refreshData();
+    refreshData(true); // Força refresh para mostrar o novo pulse
   };
 
   const handleReplyTopic = () => {
@@ -176,7 +193,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
       if (success) {
           setNotifications(prev => prev.filter(n => n.id !== reqId));
           showToast(accept ? "Conexão aceita!" : "Solicitação recusada.");
-          if(accept) refreshData(); 
+          if(accept) refreshData(true); 
       }
   };
 
@@ -306,6 +323,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                     src={user?.avatar_url || `https://ui-avatars.com/api/?name=${user?.name}&background=random`} 
                     className="w-full h-full object-cover" 
                     alt="Perfil" 
+                    loading="lazy"
                 />
             </button>
           </div>
@@ -336,7 +354,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                              <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${notif.type === 'FRIEND_REQUEST' ? 'bg-brand-primary shadow-[0_0_10px_#10b981]' : notif.type === 'REQUEST_REJECTED' ? 'bg-red-500' : 'bg-blue-500'}`}></div>
                              
                              <div className="relative">
-                                 <img src={notif.user.avatar_url} className="w-12 h-12 rounded-full bg-zinc-800 border border-white/10" />
+                                 <img src={notif.user.avatar_url} className="w-12 h-12 rounded-full bg-zinc-800 border border-white/10" loading="lazy" />
                                  <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-1">
                                      {notif.type === 'FRIEND_REQUEST' && <UserPlus size={10} className="text-brand-primary" />}
                                  </div>
@@ -394,7 +412,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                             <div className="absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-brand-primary to-brand-secondary"></div>
                             
                             <div className="flex items-center gap-4 relative z-10 mb-4">
-                                <img src={user?.avatar_url} className="w-16 h-16 rounded-xl bg-zinc-950 shadow-inner border border-white/5" />
+                                <img src={user?.avatar_url} className="w-16 h-16 rounded-xl bg-zinc-950 shadow-inner border border-white/5" loading="lazy"/>
                                 <div className="flex-1">
                                     <h3 className="text-white font-bold text-lg">{user?.name}</h3>
                                     <div className="flex items-center gap-2 mt-1">
@@ -420,7 +438,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                             <h3 className="text-zinc-900 font-bold text-sm mb-4 flex items-center gap-2"><Hexagon size={16} className="fill-zinc-900"/> ELO ID</h3>
                             <div className="w-40 h-40 bg-zinc-100 rounded-lg mb-4 flex items-center justify-center border-2 border-zinc-900 relative overflow-hidden">
                                 <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-black to-transparent"></div>
-                                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=elo_app_user:${user?.username}&color=000000`} alt="QR" className="w-36 h-36 mix-blend-multiply" />
+                                <img src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=elo_app_user:${user?.username}&color=000000`} alt="QR" className="w-36 h-36 mix-blend-multiply" loading="lazy" />
                             </div>
                             <button onClick={() => setShowQr(false)} className="text-zinc-500 text-xs font-medium hover:text-zinc-900 flex items-center gap-1">
                                 <ArrowRight size={12} className="rotate-180"/> Voltar
@@ -455,7 +473,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                      userSearchResults.map(result => (
                          <div 
                              key={result.user.id} 
-                             // Alteração Aqui: Clicar no card inteiro abre o Perfil
                              onClick={() => {
                                  if (onViewProfile) {
                                      onViewProfile(result.user.id);
@@ -464,7 +481,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                              }}
                              className="bg-zinc-900/40 border border-zinc-800 p-3 rounded-2xl flex items-center gap-4 hover:bg-zinc-900 transition-colors group cursor-pointer"
                          >
-                             <img src={result.user.avatar_url} className="w-12 h-12 rounded-full bg-zinc-800 object-cover border border-zinc-800 group-hover:border-zinc-600 transition-colors" />
+                             <img src={result.user.avatar_url} className="w-12 h-12 rounded-full bg-zinc-800 object-cover border border-zinc-800 group-hover:border-zinc-600 transition-colors" loading="lazy" />
                              <div className="flex-1 min-w-0">
                                  <h3 className="text-zinc-100 font-semibold truncate text-sm">{result.user.name}</h3>
                                  <p className="text-zinc-500 text-xs truncate font-mono">@{result.user.username}</p>
@@ -665,6 +682,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                                     src={chat.otherUser.avatar_url} 
                                     className="w-full h-full rounded-2xl object-cover bg-zinc-900 border-2 border-zinc-950" 
                                     alt={chat.otherUser.name}
+                                    loading="lazy"
                                 />
                                 <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-zinc-950 rounded-full flex items-center justify-center">
                                     <div className="w-3 h-3 bg-brand-secondary rounded-full animate-pulse"></div>
@@ -696,7 +714,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate, onChatSelect, onVie
                                 {chat.otherUser.is_deleted ? (
                                     <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700"><UserIcon size={20} className="text-zinc-600"/></div>
                                 ) : (
-                                    <img src={chat.otherUser.avatar_url} className={`w-12 h-12 rounded-full object-cover border ${isZenMode ? 'border-indigo-500/30' : 'border-zinc-800'}`} />
+                                    <img src={chat.otherUser.avatar_url} className={`w-12 h-12 rounded-full object-cover border ${isZenMode ? 'border-indigo-500/30' : 'border-zinc-800'}`} loading="lazy" />
                                 )}
                             </div>
                             

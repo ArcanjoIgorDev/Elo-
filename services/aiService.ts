@@ -2,12 +2,21 @@
 import { Message } from "../types";
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Inicializa o cliente GenAI de forma segura.
-// Se a chave não existir (ex: deploy sem env var configurada), usa uma string vazia para não crashar o app no load.
-const apiKey = (typeof process !== 'undefined' && process.env && process.env.API_KEY) ? process.env.API_KEY : '';
+// Recupera a API Key de forma robusta
+const getApiKey = () => {
+    // @ts-ignore
+    if (typeof process !== 'undefined' && process.env?.API_KEY) return process.env.API_KEY;
+    // @ts-ignore
+    if (typeof window !== 'undefined' && window.process?.env?.API_KEY) return window.process.env.API_KEY;
+    return '';
+};
+
+const apiKey = getApiKey();
 const ai = new GoogleGenAI({ apiKey });
 
-// Tipos de emoção expandidos para maior granularidade
+// Cache simples para localização AI (chave: query, valor: resposta)
+const LOCATION_CACHE = new Map<string, string[]>();
+
 export type EmotionType = 
     'Neutro' | 'Alegre' | 'Reflexivo' | 'Tenso' | 'Empático' | 
     'Apaixonado' | 'Entusiasmado' | 'Cético' | 'Visual' | 
@@ -21,17 +30,27 @@ interface AnalysisResult {
 // --- NOVAS FUNÇÕES DE LOCALIZAÇÃO VIA IA ---
 
 export const suggestLocations = async (query: string): Promise<string[]> => {
-    if (!query || query.length < 3) return [];
-    if (!apiKey) { console.warn("API_KEY não configurada"); return []; }
+    const cleanQuery = query.trim().toLowerCase();
+    if (!cleanQuery || cleanQuery.length < 3) return [];
+    
+    // Verifica Cache antes de chamar API
+    if (LOCATION_CACHE.has(cleanQuery)) {
+        return LOCATION_CACHE.get(cleanQuery) || [];
+    }
+
+    if (!apiKey) {
+        console.warn("ELO_AI: API_KEY não encontrada.");
+        return []; 
+    }
 
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: `Atue como um sistema de GPS brasileiro. O usuário digitou: "${query}". 
-            Retorne uma lista JSON com 5 sugestões de locais reais no Brasil completando o que foi digitado.
-            Formato obrigatório: "Cidade - Estado" ou "Bairro, Cidade - Estado".
-            Exemplo: Se digitar "Pinhe", retorne ["Pinheiros, São Paulo - SP", "Pinheiral - RJ", ...].
-            Priorize cidades grandes e bairros famosos.`,
+            contents: `Atue como um sistema de autocomplete de GPS. O usuário digitou: "${query}". 
+            Retorne um ARRAY JSON com 5 sugestões de locais reais no Brasil.
+            Formato: ["Cidade - Estado", "Bairro, Cidade - Estado"].
+            Exemplo: ["São Paulo - SP", "Santo Amaro, São Paulo - SP"].
+            NÃO use markdown. Apenas o JSON cru.`,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -42,11 +61,15 @@ export const suggestLocations = async (query: string): Promise<string[]> => {
         });
 
         if (response.text) {
-            return JSON.parse(response.text);
+            const cleanText = response.text.replace(/```json|```/g, '').trim();
+            const results = JSON.parse(cleanText);
+            // Salva no Cache
+            LOCATION_CACHE.set(cleanQuery, results);
+            return results;
         }
         return [];
     } catch (error) {
-        console.error("Erro ao sugerir locais:", error);
+        console.error("ELO_AI: Erro ao sugerir locais:", error);
         return [];
     }
 };
@@ -54,11 +77,15 @@ export const suggestLocations = async (query: string): Promise<string[]> => {
 export const geocodeLocation = async (locationString: string): Promise<{ latitude: number, longitude: number } | null> => {
     if (!apiKey) return null;
 
+    // Cache simples também para geocoding (chave: string completa)
+    const cacheKey = `GEO:${locationString}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) return JSON.parse(cached);
+
     try {
         const response = await ai.models.generateContent({
             model: "gemini-2.5-flash",
-            contents: `Retorne as coordenadas geográficas (latitude e longitude) exatas do centro de: "${locationString}".
-            Retorne apenas o JSON.`,
+            contents: `Coordenadas geográficas exatas (latitude, longitude) do centro de: "${locationString}". JSON apenas.`,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -73,20 +100,23 @@ export const geocodeLocation = async (locationString: string): Promise<{ latitud
         });
 
         if (response.text) {
-            return JSON.parse(response.text);
+             const cleanText = response.text.replace(/```json|```/g, '').trim();
+             const res = JSON.parse(cleanText);
+             // Salva no Cache (Persistente para geo)
+             localStorage.setItem(cacheKey, JSON.stringify(res));
+             return res;
         }
         return null;
     } catch (error) {
-        console.error("Erro ao geocodificar:", error);
+        console.error("ELO_AI: Erro ao geocodificar:", error);
         return null;
     }
 };
 
-// --- ANÁLISE DE EMOÇÃO EXISTENTE ---
+// --- ANÁLISE DE EMOÇÃO ---
 
 export const analyzeConversationEmotion = async (messages: Message[], currentUserId: string): Promise<AnalysisResult> => {
-  // Simulação rápida de processamento (local) para não depender sempre da API em interações rápidas
-  await new Promise(resolve => setTimeout(resolve, 150));
+  await new Promise(resolve => setTimeout(resolve, 50)); // Delay reduzido para UI ficar mais responsiva
 
   if (messages.length === 0) {
       return {
@@ -95,7 +125,6 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
       };
   }
 
-  // Analisa as últimas 20 mensagens para melhor contexto
   const myMessages = messages.filter(m => m.sender_id === currentUserId).slice(-20); 
   const partnerMessages = messages.filter(m => m.sender_id !== currentUserId).slice(-20);
 
@@ -105,14 +134,12 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
       const textMsgs = msgs.filter(m => m.type !== 'image' && m.type !== 'location');
       const imageMsgs = msgs.filter(m => m.type === 'image');
 
-      // Se há predominância visual
       if (imageMsgs.length > 0 && textMsgs.length === 0) {
           return { tone: 'Visual', intensity: Math.min(100, 20 + (imageMsgs.length * 10)) };
       }
 
       const text = textMsgs.map(m => m.content.toLowerCase()).join(' ');
       
-      // Dicionário Expandido 2.0 (Local NLP Heuristics)
       const dictionary: Record<string, string[]> = {
           alegre: ['kkk', 'haha', 'lol', 'rs', 'legal', 'top', 'bom', 'ótimo', 'maravilha', 'show', 'feliz', 'sorrir', 'animado', 'boas', 'hehe', '😂', '😁', 'gostei'],
           reflexivo: ['hmm', 'será', 'acho', 'talvez', 'pensando', 'vida', 'tempo', 'difícil', 'triste', 'pena', 'sinto', 'calma', '...', 'profundo', 'sentido', '🤔'],
@@ -134,22 +161,8 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
           words.forEach(w => {
                const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                const regex = new RegExp(w.match(/\p{Emoji}/u) ? escaped : `\\b${escaped}\\b`, 'giu');
-               
-               const matches = text.match(regex);
-               if (matches) {
-                   count += matches.length;
-                   if (new RegExp(`${escaped}[!.?]`, 'i').test(text)) count += 0.5;
-               }
+               if (text.match(regex)) count += (text.match(regex) || []).length;
           });
-          
-          if ((key === 'tenso' || key === 'entusiasmado') && textMsgs.some(m => m.content === m.content.toUpperCase() && m.content.length > 5)) {
-              count += 2;
-          }
-
-          if ((key === 'entusiasmado' || key === 'alegre') && text.includes('!!')) {
-              count += 1;
-          }
-
           scores[key] = count;
       });
 
@@ -157,40 +170,22 @@ export const analyzeConversationEmotion = async (messages: Message[], currentUse
       let winnerKey = 'neutro';
 
       Object.entries(scores).forEach(([key, score]) => {
-          if (score > maxScore) {
-              maxScore = score;
-              winnerKey = key;
-          }
+          if (score > maxScore) { maxScore = score; winnerKey = key; }
       });
 
       const map: Record<string, EmotionType> = {
-          alegre: 'Alegre',
-          reflexivo: 'Reflexivo',
-          tenso: 'Tenso',
-          empatico: 'Empático',
-          apaixonado: 'Apaixonado',
-          entusiasmado: 'Entusiasmado',
-          cetico: 'Cético',
-          ansioso: 'Ansioso',
-          grato: 'Grato',
-          curioso: 'Curioso',
-          ironico: 'Irônico',
-          neutro: 'Neutro'
+          alegre: 'Alegre', reflexivo: 'Reflexivo', tenso: 'Tenso', empatico: 'Empático', apaixonado: 'Apaixonado',
+          entusiasmado: 'Entusiasmado', cetico: 'Cético', ansioso: 'Ansioso', grato: 'Grato', curioso: 'Curioso',
+          ironico: 'Irônico', neutro: 'Neutro'
       };
 
       const tone = map[winnerKey] || 'Neutro';
-      
-      const msgCount = msgs.length;
-      let intensity = Math.min(100, (maxScore / Math.max(1, msgCount * 0.5)) * 100);
-      
+      let intensity = Math.min(100, (maxScore / Math.max(1, msgs.length * 0.5)) * 100);
       if (maxScore > 3) intensity = Math.max(intensity, 60);
       if (winnerKey === 'neutro') intensity = 0;
 
       return { tone, intensity };
   };
 
-  return {
-      myEmotion: analyzeSubset(myMessages),
-      partnerEmotion: analyzeSubset(partnerMessages)
-  };
+  return { myEmotion: analyzeSubset(myMessages), partnerEmotion: analyzeSubset(partnerMessages) };
 };
