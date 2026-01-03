@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { User, Pulse, ActivityPoint } from '../types';
 import { fetchPulses, getUserProfile, updateUserProfileMeta, getFriendsCount, fetchUserChats, fetchUserResonance, sendFriendRequest, calculateDistance } from '../services/dataService';
-import { suggestLocations, geocodeLocation } from '../services/aiService';
+import { searchCities, getCityCoordinates } from '../services/locationData'; // IMPORT CORRIGIDO
 import { useAuth } from '../context/AuthContext';
 import { ArrowLeft, Zap, UserPlus, Check, MessageCircle, Edit2, Camera, Upload, Save, Settings, Users, Activity, Hexagon, Grid, Layers, Share2, BarChart3, Fingerprint, MapPin, GraduationCap, Globe, LocateFixed, Search, Loader2 } from 'lucide-react';
 import { AreaChart, Area, Tooltip, ResponsiveContainer, CartesianGrid, XAxis } from 'recharts';
@@ -39,13 +39,12 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
   const [editEducation, setEditEducation] = useState('');
   const [showAvatarSelector, setShowAvatarSelector] = useState(false);
   
-  // Location AI State
+  // Location Non-AI State
   const [editCity, setEditCity] = useState('');
   const [locationSuggestions, setLocationSuggestions] = useState<string[]>([]);
   const [isSearchingLocation, setIsSearchingLocation] = useState(false);
   const [showLocationResults, setShowLocationResults] = useState(false);
-  const locationTimeoutRef = useRef<any>(null);
-  const [updatingLocation, setUpdatingLocation] = useState(false); // Used for saving state
+  const [updatingLocation, setUpdatingLocation] = useState(false); 
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -128,24 +127,18 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
       }
   };
 
-  // --- Location Autocomplete Logic ---
+  // --- Location Autocomplete Logic (Local DB) ---
   const handleCityChange = (val: string) => {
       setEditCity(val);
-      setShowLocationResults(true);
-      
-      if (locationTimeoutRef.current) clearTimeout(locationTimeoutRef.current);
-      
-      if (val.length < 3) {
+      if (val.length < 2) {
+          setShowLocationResults(false);
           setLocationSuggestions([]);
           return;
       }
-
-      setIsSearchingLocation(true);
-      locationTimeoutRef.current = setTimeout(async () => {
-          const suggestions = await suggestLocations(val);
-          setLocationSuggestions(suggestions);
-          setIsSearchingLocation(false);
-      }, 600);
+      
+      const results = searchCities(val); // Usa função local síncrona
+      setLocationSuggestions(results);
+      setShowLocationResults(results.length > 0);
   };
 
   const selectLocation = (loc: string) => {
@@ -164,9 +157,9 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
           education: editEducation
       };
 
-      // AI Geocoding: Se mudou a cidade, calcula novas coordenadas
+      // Geocoding Local (Sem IA)
       if (editCity && editCity !== profileUser?.city) {
-          const coords = await geocodeLocation(editCity);
+          const coords = await getCityCoordinates(editCity);
           if (coords) {
               updates.latitude = coords.latitude;
               updates.longitude = coords.longitude;
@@ -297,7 +290,7 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
                         <div className="grid grid-cols-1 gap-3">
                             <input value={editEducation} onChange={(e) => setEditEducation(e.target.value)} placeholder="Formação / Cargo" className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 text-xs text-zinc-200 outline-none focus:border-brand-primary/50" />
                             
-                            {/* SMART LOCATION INPUT - FIXED LAYOUT */}
+                            {/* SMART LOCATION INPUT - LOCAL DB */}
                             <div className="relative z-20">
                                 <div className="relative group">
                                     <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 group-focus-within:text-brand-primary transition-colors"/>
@@ -305,20 +298,15 @@ const ProfileScreen: React.FC<ProfileScreenProps> = ({ targetUserId, onBack, onS
                                         value={editCity} 
                                         onChange={(e) => handleCityChange(e.target.value)} 
                                         onFocus={() => setShowLocationResults(true)}
-                                        placeholder="Cidade - Estado (IA Auto)" 
+                                        placeholder="Cidade - Estado" 
                                         className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl pl-9 pr-9 py-3 text-xs text-zinc-200 outline-none focus:border-brand-primary/50 transition-colors" 
                                     />
-                                    {isSearchingLocation && (
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center justify-center">
-                                            <Loader2 size={14} className="animate-spin text-brand-primary"/>
-                                        </div>
-                                    )}
                                 </div>
                                 
                                 {showLocationResults && locationSuggestions.length > 0 && (
                                     <div className="absolute top-full left-0 w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden animate-fade-in z-30 max-h-48 overflow-y-auto">
                                         <div className="px-3 py-2 text-[9px] text-zinc-500 font-bold uppercase tracking-widest bg-zinc-950/50 flex items-center justify-between">
-                                            <span>Sugestões Reais</span>
+                                            <span>Sugestões</span>
                                             <Globe size={10} />
                                         </div>
                                         {locationSuggestions.map((loc, i) => (

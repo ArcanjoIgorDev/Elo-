@@ -71,9 +71,9 @@ export const suggestLocations = async (query: string): Promise<string[]> => {
     }
 
     try {
-        // Usando 1.5-flash por ser extremamente estável para tarefas de formatação JSON
+        // Usando gemini-3-flash-preview conforme diretrizes atuais
         const response = await ai.models.generateContent({
-            model: "gemini-1.5-flash", 
+            model: "gemini-3-flash-preview", 
             contents: `Atue como um sistema de autocomplete de GPS. O usuário digitou: "${query}". 
             Retorne um ARRAY JSON estrito com 5 sugestões de locais reais no Brasil.
             Formato: ["Cidade - Estado", "Bairro, Cidade - Estado"].
@@ -112,7 +112,7 @@ export const geocodeLocation = async (locationString: string): Promise<{ latitud
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-1.5-flash",
+            model: "gemini-3-flash-preview",
             contents: `Coordenadas geográficas exatas (latitude, longitude) do centro de: "${locationString}". JSON apenas.`,
             config: {
                 responseMimeType: "application/json",

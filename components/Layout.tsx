@@ -7,7 +7,7 @@ interface LayoutProps {
   children: React.ReactNode;
   activeScreen: AppScreen;
   onNavigate: (screen: AppScreen) => void;
-  onTriggerVibe?: () => void; // Nova prop para ação do botão central
+  onTriggerVibe?: () => void; 
 }
 
 const Layout: React.FC<LayoutProps> = ({ children, activeScreen, onNavigate, onTriggerVibe }) => {
@@ -29,7 +29,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeScreen, onNavigate, onT
           label="Chat"
         />
 
-        {/* Map Tab (NOVO) */}
+        {/* Map Tab */}
         <NavButton 
           isActive={activeScreen === AppScreen.MAP} 
           onClick={() => onNavigate(AppScreen.MAP)}
@@ -37,26 +37,29 @@ const Layout: React.FC<LayoutProps> = ({ children, activeScreen, onNavigate, onT
           label="Grid"
         />
 
-        {/* Center Action Button (VIBE) */}
-        <div className="relative -top-6 mx-2">
+        {/* Center Action Button (FLOATING ZAP) */}
+        <div className="relative -top-8 mx-4 group">
             <button 
                 onClick={() => {
                     onNavigate(AppScreen.HOME);
                     if(onTriggerVibe) onTriggerVibe();
                 }}
-                className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-primary to-emerald-600 flex items-center justify-center text-zinc-950 shadow-[0_0_20px_rgba(16,185,129,0.4)] hover:scale-105 active:scale-95 transition-all border-4 border-zinc-950 group"
+                className="w-16 h-16 rounded-full bg-zinc-950 flex items-center justify-center shadow-[0_0_25px_rgba(16,185,129,0.3)] hover:scale-105 active:scale-95 transition-all border-2 border-brand-primary relative z-10"
             >
-                <Zap size={28} className="fill-zinc-950 group-hover:animate-pulse" />
-                {/* Glow effect */}
-                <div className="absolute inset-0 rounded-2xl bg-brand-primary blur-xl opacity-40 -z-10"></div>
+                <div className="w-12 h-12 rounded-full bg-brand-primary flex items-center justify-center">
+                     <Zap size={24} className="fill-black text-black" />
+                </div>
             </button>
+            {/* Pulsing Rings */}
+            <div className="absolute inset-0 rounded-full border border-brand-primary/30 animate-ping opacity-20"></div>
+            <div className="absolute inset-2 rounded-full border border-brand-primary/50 animate-pulse opacity-40"></div>
         </div>
 
-        {/* Eco/Stats Tab (Mantido, mas agora 4 itens no total) */}
+        {/* Eco/Stats Tab */}
          <NavButton 
           isActive={activeScreen === AppScreen.ECO} 
           onClick={() => onNavigate(AppScreen.ECO)}
-          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M2 12h20M12 12l4-4m-4 4l-4 4"/></svg>} // Using custom generic icon or TrendingUp
+          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M2 12h20M12 12l4-4m-4 4l-4 4"/></svg>} 
           label="Eco"
         />
 

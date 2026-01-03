@@ -7,19 +7,20 @@ export interface User {
   phone?: string;
   avatar_url?: string;
   bio?: string;
-  city?: string; // Novo
-  education?: string; // Novo
-  latitude?: number; // Novo
-  longitude?: number; // Novo
+  city?: string;
+  education?: string;
+  latitude?: number;
+  longitude?: number;
   is_deleted?: boolean;
 }
 
-export type MessageType = 'text' | 'image' | 'audio' | 'location';
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'location';
 
 export interface Message {
   id: string;
   sender_id: string | null;
   content: string;
+  media_url?: string; // Novo campo para URL do storage
   type?: MessageType;
   created_at: string;
   is_read: boolean;
@@ -38,8 +39,8 @@ export interface Pulse {
   user_id: string;
   user_name: string;
   user_avatar: string;
-  content_type: 'text' | 'image';
-  content: string; 
+  content_type: 'text' | 'image' | 'video';
+  content: string; // URL ou Texto
   description?: string;
   emotional_state?: EmotionalState;
   created_at: string;
@@ -50,6 +51,31 @@ export interface PulseReactionCounts {
   heart: number;
   fire: number;
 }
+
+// --- NOVOS TIPOS PARA O FEED ---
+
+export interface Post {
+    id: string;
+    user: User;
+    content: string;
+    media_url?: string;
+    media_type?: 'image' | 'video';
+    allow_comments: boolean;
+    likes_count: number;
+    comments_count: number;
+    created_at: string;
+    liked_by_me?: boolean; // Campo virtual para UI
+}
+
+export interface PostComment {
+    id: string;
+    post_id: string;
+    user: User;
+    content: string;
+    created_at: string;
+}
+
+// ------------------------------
 
 export interface Topic {
     id: string;
@@ -92,7 +118,7 @@ export interface ChatSummary {
     name: string;
     username: string;
     avatar_url: string;
-    is_deleted?: boolean; // Novo
+    is_deleted?: boolean;
   };
   lastMessage?: Message;
   unreadCount: number;
@@ -111,7 +137,7 @@ export enum AppScreen {
   LOGIN = 'LOGIN',
   HOME = 'HOME',
   CHAT = 'CHAT',
-  MAP = 'MAP', // Nova Tela
+  MAP = 'MAP',
   ECO = 'ECO',
   PROFILE = 'PROFILE',
   USER_PROFILE = 'USER_PROFILE',
