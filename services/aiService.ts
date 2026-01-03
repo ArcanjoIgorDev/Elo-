@@ -4,10 +4,17 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 // Recupera a API Key de forma robusta
 const getApiKey = () => {
+    // 1. Tenta var de ambiente padrão (Build tools)
     // @ts-ignore
     if (typeof process !== 'undefined' && process.env?.API_KEY) return process.env.API_KEY;
+    // 2. Tenta window.process (Polyfill)
     // @ts-ignore
     if (typeof window !== 'undefined' && window.process?.env?.API_KEY) return window.process.env.API_KEY;
+    // 3. Fallback para debug em produção (permite setar localStorage.setItem('DEBUG_API_KEY', 'sua-key') no console)
+    if (typeof window !== 'undefined') {
+        const debugKey = localStorage.getItem('DEBUG_API_KEY');
+        if (debugKey) return debugKey;
+    }
     return '';
 };
 
@@ -27,6 +34,26 @@ interface AnalysisResult {
     partnerEmotion: { tone: EmotionType; intensity: number };
 }
 
+// --- HELPER: Extração Segura de JSON ---
+const extractJSON = (text: string): any => {
+    try {
+        // Tenta parse direto primeiro
+        return JSON.parse(text);
+    } catch (e) {
+        // Se falhar, tenta extrair o primeiro bloco JSON válido (Array [...] ou Objeto {...})
+        const match = text.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
+        if (match) {
+            try {
+                return JSON.parse(match[0]);
+            } catch (e2) {
+                console.error("ELO_AI: Falha ao extrair JSON via regex", e2);
+                return null;
+            }
+        }
+        return null;
+    }
+};
+
 // --- NOVAS FUNÇÕES DE LOCALIZAÇÃO VIA IA ---
 
 export const suggestLocations = async (query: string): Promise<string[]> => {
@@ -39,18 +66,19 @@ export const suggestLocations = async (query: string): Promise<string[]> => {
     }
 
     if (!apiKey) {
-        console.warn("ELO_AI: API_KEY não encontrada.");
+        console.warn("ELO_AI: API_KEY não encontrada. Use localStorage.setItem('DEBUG_API_KEY', 'key') para testar.");
         return []; 
     }
 
     try {
+        // Usando 1.5-flash por ser extremamente estável para tarefas de formatação JSON
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-1.5-flash", 
             contents: `Atue como um sistema de autocomplete de GPS. O usuário digitou: "${query}". 
-            Retorne um ARRAY JSON com 5 sugestões de locais reais no Brasil.
+            Retorne um ARRAY JSON estrito com 5 sugestões de locais reais no Brasil.
             Formato: ["Cidade - Estado", "Bairro, Cidade - Estado"].
             Exemplo: ["São Paulo - SP", "Santo Amaro, São Paulo - SP"].
-            NÃO use markdown. Apenas o JSON cru.`,
+            Retorne APENAS o JSON.`,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
@@ -61,11 +89,11 @@ export const suggestLocations = async (query: string): Promise<string[]> => {
         });
 
         if (response.text) {
-            const cleanText = response.text.replace(/```json|```/g, '').trim();
-            const results = JSON.parse(cleanText);
-            // Salva no Cache
-            LOCATION_CACHE.set(cleanQuery, results);
-            return results;
+            const results = extractJSON(response.text);
+            if (Array.isArray(results)) {
+                LOCATION_CACHE.set(cleanQuery, results);
+                return results;
+            }
         }
         return [];
     } catch (error) {
@@ -84,7 +112,7 @@ export const geocodeLocation = async (locationString: string): Promise<{ latitud
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-1.5-flash",
             contents: `Coordenadas geográficas exatas (latitude, longitude) do centro de: "${locationString}". JSON apenas.`,
             config: {
                 responseMimeType: "application/json",
@@ -100,11 +128,12 @@ export const geocodeLocation = async (locationString: string): Promise<{ latitud
         });
 
         if (response.text) {
-             const cleanText = response.text.replace(/```json|```/g, '').trim();
-             const res = JSON.parse(cleanText);
-             // Salva no Cache (Persistente para geo)
-             localStorage.setItem(cacheKey, JSON.stringify(res));
-             return res;
+             const res = extractJSON(response.text);
+             if (res && typeof res.latitude === 'number' && typeof res.longitude === 'number') {
+                 // Salva no Cache (Persistente para geo)
+                 localStorage.setItem(cacheKey, JSON.stringify(res));
+                 return res;
+             }
         }
         return null;
     } catch (error) {
@@ -116,7 +145,7 @@ export const geocodeLocation = async (locationString: string): Promise<{ latitud
 // --- ANÁLISE DE EMOÇÃO ---
 
 export const analyzeConversationEmotion = async (messages: Message[], currentUserId: string): Promise<AnalysisResult> => {
-  await new Promise(resolve => setTimeout(resolve, 50)); // Delay reduzido para UI ficar mais responsiva
+  await new Promise(resolve => setTimeout(resolve, 50)); 
 
   if (messages.length === 0) {
       return {
