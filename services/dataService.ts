@@ -419,9 +419,10 @@ export const deleteUserAccount = async (wipeMessages: boolean): Promise<{success
         }
 
         // Anonimizar Perfil (Tombstone)
+        // Alteração chave: Usa timestamp para liberar o username antigo
         const { error: updateError } = await supabase.from('users_meta').update({
             name: 'Usuário Deletado',
-            username: `deleted_${userId.substring(0,8)}`,
+            username: `deleted_${Date.now()}_${Math.floor(Math.random() * 1000)}`, // Libera o username original imediatamente
             avatar_url: 'https://ui-avatars.com/api/?name=X&background=000&color=fff',
             bio: null,
             phone: null,
