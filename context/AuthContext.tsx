@@ -169,6 +169,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const internalEmail = `${cleanUsername}@elo.app`;
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
 
+    // 1. Criar Auth User
     const { data, error } = await supabase.auth.signUp({
         email: internalEmail,
         password,
@@ -182,10 +183,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
     });
 
-    if (error) return { data, error };
+    if (error) {
+        // Tradução amigável de erros comuns do Supabase Auth
+        if (error.message.includes('User already registered')) {
+            return { data, error: { message: "Este nome de usuário já está registrado (email associado em uso)." } };
+        }
+        return { data, error };
+    }
 
+    // 2. Garantir criação no users_meta
     if (data.user) {
-        await supabase.from('users_meta').upsert({
+        const { error: metaError } = await supabase.from('users_meta').upsert({
                 user_id: data.user.id,
                 username: cleanUsername,
                 name: name,
@@ -194,6 +202,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 bio: '',
                 is_deleted: false // Garante que novas contas nasçam vivas
             }, { onConflict: 'user_id' }); 
+        
+        if (metaError) {
+            console.error("Meta Creation Error:", metaError);
+            // Se falhar o meta, o usuário fica num estado inconsistente. Retornamos o erro.
+            return { data, error: { message: "Erro ao criar perfil público. Tente novamente." } };
+        }
     }
     
     return { data, error };
