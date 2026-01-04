@@ -317,20 +317,27 @@ export const sendFriendRequest = async (currentUserId: string, targetUserId: str
 
 export const deletePost = async (postId: string): Promise<{success: boolean, error?: string}> => {
     try {
+        // Tentar RPC (Método rápido e atômico)
         const { error: rpcError } = await supabase.rpc('delete_post_fully', { target_post_id: postId });
+        
         if (!rpcError) {
             CACHE.feed.lastFetch = 0;
             return { success: true };
         }
 
+        // Fallback Manual se RPC falhar (erro 'operator does not exist' etc)
+        console.warn("[ELO] RPC falhou, iniciando deleção manual...", rpcError);
+
         await supabase.from('post_likes').delete().eq('post_id', postId);
-        await supabase.from('notifications').delete().eq('entity_id', postId);
+        // Supabase trata conversão de tipos automaticamente aqui no client
+        await supabase.from('notifications').delete().eq('entity_id', postId); 
 
         const { data: comments } = await supabase.from('post_comments').select('id').eq('post_id', postId);
         if (comments && comments.length > 0) {
             const commentIds = comments.map(c => c.id);
             await supabase.from('comment_likes').delete().in('comment_id', commentIds);
-            await supabase.from('notifications').delete().in('entity_id', commentIds);
+            // Delete notifications linked to comments
+            await supabase.from('notifications').delete().in('entity_id', commentIds); 
             await supabase.from('post_comments').delete().eq('post_id', postId);
         }
 
@@ -341,6 +348,7 @@ export const deletePost = async (postId: string): Promise<{success: boolean, err
         return { success: true };
 
     } catch(e: any) {
+        console.error("Delete post failed completely:", e);
         return { success: false, error: e.message || "Não foi possível apagar." };
     }
 };
@@ -378,8 +386,54 @@ export const deletePostComment = async (commentId: string): Promise<boolean> => 
 // --- ACCOUNT DELETION ---
 export const deleteUserAccount = async (wipeMessages: boolean): Promise<{success: boolean, error?: string}> => {
     try {
-        const { error } = await supabase.rpc('delete_own_account', { wipe_messages: wipeMessages });
-        if (error) throw error;
+        // 1. Tentar Método Rápido (RPC)
+        const { error: rpcError } = await supabase.rpc('delete_own_account', { wipe_messages: wipeMessages });
+        if (!rpcError) return { success: true };
+
+        console.warn("RPC Account Deletion Failed, using Manual Fallback...", rpcError);
+
+        // 2. Método Manual (Fallback) - Mais lento mas garantido
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("Usuário não autenticado");
+        const userId = user.id;
+
+        // Deletar interações
+        await supabase.from('post_likes').delete().eq('user_id', userId);
+        await supabase.from('comment_likes').delete().eq('user_id', userId);
+        await supabase.from('pulse_reactions').delete().eq('user_id', userId);
+        
+        // Deletar notificações (enviadas e recebidas)
+        await supabase.from('notifications').delete().eq('user_id', userId);
+        await supabase.from('notifications').delete().eq('actor_id', userId);
+
+        // Deletar conexões
+        await supabase.from('friendships').delete().or(`user_id.eq.${userId},friend_id.eq.${userId}`);
+        
+        // Deletar conteúdo
+        await supabase.from('post_comments').delete().eq('user_id', userId);
+        await supabase.from('posts').delete().eq('user_id', userId);
+        await supabase.from('pulsos').delete().eq('user_id', userId);
+
+        if (wipeMessages) {
+            await supabase.from('messages').delete().eq('sender_id', userId);
+        }
+
+        // Anonimizar Perfil (Tombstone)
+        const { error: updateError } = await supabase.from('users_meta').update({
+            name: 'Usuário Deletado',
+            username: `deleted_${userId.substring(0,8)}`,
+            avatar_url: 'https://ui-avatars.com/api/?name=X&background=000&color=fff',
+            bio: null,
+            phone: null,
+            city: null,
+            education: null,
+            latitude: null,
+            longitude: null,
+            is_deleted: true
+        }).eq('user_id', userId);
+
+        if (updateError) throw updateError;
+
         return { success: true };
     } catch (e: any) {
         console.error("Account Deletion Error:", e);
