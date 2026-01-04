@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { User } from '../types';
@@ -35,6 +36,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
+        // Apenas busca perfil se já não tivermos usuário ou se o ID mudou
+        // Para evitar loops, mas garantindo verificação de deleted
         fetchFullUserProfile(session.user.id, session);
         startActivityTimer();
       } else {
@@ -81,24 +84,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const fetchFullUserProfile = async (userId: string, session: Session) => {
-      const { data: meta } = await supabase
-          .from('users_meta')
-          .select('*')
-          .eq('user_id', userId)
-          .single();
-      
-      const metadata = session.user.user_metadata || {};
+      try {
+          const { data: meta, error } = await supabase
+              .from('users_meta')
+              .select('*')
+              .eq('user_id', userId)
+              .single();
+          
+          if (error) {
+              console.error("Error fetching user meta:", error);
+              // Não bloqueia login por erro de rede, mas usuário fica incompleto
+          }
 
-      setUser({
-          id: session.user.id,
-          email: session.user.email!,
-          name: meta?.name || metadata.name || 'Usuário',
-          username: meta?.username || metadata.username,
-          phone: meta?.phone || metadata.phone,
-          avatar_url: meta?.avatar_url || metadata.avatar_url,
-          bio: meta?.bio || ''
-      });
-      setLoading(false);
+          // --- BLOQUEIO DE CONTA DELETADA (Sessão Restaurada) ---
+          if (meta?.is_deleted) {
+              console.warn("ELO: Tentativa de acesso a conta deletada bloqueada.");
+              await supabase.auth.signOut();
+              setUser(null);
+              setLoading(false);
+              return;
+          }
+          // ------------------------------------------------------
+
+          const metadata = session.user.user_metadata || {};
+
+          setUser({
+              id: session.user.id,
+              email: session.user.email!,
+              name: meta?.name || metadata.name || 'Usuário',
+              username: meta?.username || metadata.username,
+              phone: meta?.phone || metadata.phone,
+              avatar_url: meta?.avatar_url || metadata.avatar_url,
+              bio: meta?.bio || '',
+              latitude: meta?.latitude,
+              longitude: meta?.longitude,
+              city: meta?.city,
+              education: meta?.education
+          });
+      } catch (e) {
+          console.error("Profile fetch error", e);
+      } finally {
+          setLoading(false);
+      }
   };
 
   const signIn = async (identifier: string, password: string) => {
@@ -109,9 +136,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       password,
     });
     
-    if (error && error.message.includes("Invalid login credentials")) {
-        return { data, error: { message: "Usuário ou senha incorretos." } };
+    if (error) {
+        if (error.message.includes("Invalid login credentials")) {
+            return { data, error: { message: "Usuário ou senha incorretos." } };
+        }
+        return { data, error };
     }
+
+    // --- BLOQUEIO DE CONTA DELETADA (Login Ativo) ---
+    if (data.user) {
+        const { data: meta } = await supabase
+            .from('users_meta')
+            .select('is_deleted')
+            .eq('user_id', data.user.id)
+            .single();
+
+        if (meta?.is_deleted) {
+            await supabase.auth.signOut();
+            return { 
+                data: { user: null, session: null }, 
+                error: { message: "Esta conta foi excluída permanentemente e não pode ser acessada." } 
+            };
+        }
+    }
+    // ------------------------------------------------
     
     return { data, error };
   };
@@ -143,7 +191,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 name: name,
                 avatar_url: avatarUrl,
                 phone: phone,
-                bio: ''
+                bio: '',
+                is_deleted: false // Garante que novas contas nasçam vivas
             }, { onConflict: 'user_id' }); 
     }
     
