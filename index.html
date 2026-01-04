@@ -30,13 +30,23 @@
               mono: ['JetBrains Mono', 'monospace'], // Hacker font
             },
             animation: {
-              'fade-in': 'fadeIn 0.3s ease-in-out',
-              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'fade-in': 'fadeIn 0.5s ease-out forwards',
+              'pulse-slow': 'pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              'slide-up': 'slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              'float': 'float 6s ease-in-out infinite',
             },
             keyframes: {
               fadeIn: {
-                '0%': { opacity: '0', transform: 'scale(0.95)' },
-                '100%': { opacity: '1', transform: 'scale(1)' },
+                '0%': { opacity: '0', filter: 'blur(5px)' },
+                '100%': { opacity: '1', filter: 'blur(0)' },
+              },
+              slideUp: {
+                '0%': { transform: 'translateY(20px)', opacity: '0' },
+                '100%': { transform: 'translateY(0)', opacity: '1' },
+              },
+              float: {
+                '0%, 100%': { transform: 'translateY(0)' },
+                '50%': { transform: 'translateY(-10px)' },
               }
             }
           }
@@ -48,14 +58,12 @@
       window.process = window.process || {};
       window.process.env = window.process.env || {};
       window.process.env.NODE_ENV = window.process.env.NODE_ENV || 'development';
-      // Evita crash se API_KEY não estiver definida no build/runtime
       if (!window.process.env.API_KEY) {
-          // Placeholder seguro para não quebrar a inicialização
           window.process.env.API_KEY = ''; 
           console.log('ELO: API Key placeholder initialized.');
       }
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <style>
       body {
         background-color: #050505;
@@ -65,24 +73,18 @@
         overscroll-behavior-y: none;
       }
       
-      /* Scanline Effect */
-      body::after {
+      /* Global Noise Texture */
+      body::before {
         content: "";
         position: fixed;
         top: 0;
         left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: repeating-linear-gradient(
-          0deg,
-          rgba(0, 0, 0, 0.05),
-          rgba(0, 0, 0, 0.05) 1px,
-          transparent 1px,
-          transparent 2px
-        );
+        width: 100%;
+        height: 100%;
+        background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.04'/%3E%3C/svg%3E");
         pointer-events: none;
         z-index: 9999;
-        opacity: 0.3;
+        mix-blend-mode: overlay;
       }
 
       /* Clean Scrollbars */
@@ -94,28 +96,20 @@
         scrollbar-width: none;
       }
       
-      /* Glass Utility */
-      .glass-panel {
-        background: rgba(24, 24, 27, 0.6);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-      }
-
       /* Hacker Map Filter - Matrix Green Refined */
       .hacker-map-tiles {
-        filter: sepia(100%) hue-rotate(95deg) saturate(300%) brightness(0.8) contrast(1.5);
+        filter: grayscale(100%) invert(100%) contrast(1.1) brightness(0.9);
       }
 
       /* Connection Line Animation (Data Flow) */
       .connection-line-flow {
         stroke-dasharray: 6, 12;
-        animation: dataFlow 1s linear infinite;
+        animation: dataFlow 2s linear infinite;
       }
 
       @keyframes dataFlow {
         from {
-          stroke-dashoffset: 18;
+          stroke-dashoffset: 24;
         }
         to {
           stroke-dashoffset: 0;
@@ -135,6 +129,15 @@
         to {
           box-shadow: 0 0 0 20px rgba(16, 185, 129, 0);
         }
+      }
+
+      /* Custom Marker Styles */
+      .friend-marker img {
+          transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      }
+      .friend-marker:hover img {
+          transform: scale(1.2);
+          border-color: #10b981;
       }
     </style>
   <script type="importmap">

@@ -1,8 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Pulse, ReactionType } from '../types';
-import { Trash2, Heart, Flame, Play } from 'lucide-react';
-import { deletePulse, getPulseReactions, togglePulseReaction } from '../services/dataService';
+import { Trash2, Heart, Flame, Play, Clock, Loader2, Eye } from 'lucide-react';
+import { deletePulse, getPulseReactions, togglePulseReaction, registerView } from '../services/dataService';
 import VideoPlayer from './VideoPlayer';
 
 interface PulseCardProps {
@@ -17,11 +17,17 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
   const [reactions, setReactions] = useState<{heart: number, fire: number}>({heart: 0, fire: 0});
   const [myReaction, setMyReaction] = useState<ReactionType | null>(null);
   const [showHeartOverlay, setShowHeartOverlay] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   
-  // Cálculo de tempo relativo (Ex: "Há 2h")
   const [timeAgo, setTimeAgo] = useState('');
+  const viewRegistered = useRef(false);
 
   useEffect(() => {
+    if (!viewRegistered.current) {
+        registerView(pulse.id, 'pulse');
+        viewRegistered.current = true;
+    }
+
     getPulseReactions(pulse.id, currentUserId).then(data => {
         setReactions(data.counts);
         setMyReaction(data.userReaction);
@@ -30,10 +36,10 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
     const updateTime = () => {
         const diff = Date.now() - new Date(pulse.created_at).getTime();
         const mins = Math.floor(diff / 60000);
-        if (mins < 60) setTimeAgo(`Há ${mins}m`);
+        if (mins < 60) setTimeAgo(`${mins}m`);
         else {
             const hours = Math.floor(mins / 60);
-            setTimeAgo(`Há ${hours}h`);
+            setTimeAgo(`${hours}h`);
         }
     };
     updateTime();
@@ -43,9 +49,15 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
 
   const handleDelete = async (e: React.MouseEvent) => {
       e.stopPropagation();
-      if(window.confirm("Remover?")) {
+      if(window.confirm("Apagar esta Vibe permanentemente?")) {
+          setIsDeleting(true);
           const success = await deletePulse(pulse.id);
-          if(success) onDelete(pulse.id);
+          if(success) {
+              onDelete(pulse.id);
+          } else {
+              setIsDeleting(false);
+              alert("Erro ao apagar. Tente novamente ou verifique sua conexão.");
+          }
       }
   };
 
@@ -78,7 +90,7 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
   return (
     <div 
         onDoubleClick={handleDoubleClick}
-        className="min-w-[140px] w-[140px] h-[240px] bg-zinc-900 rounded-[20px] relative group snap-start overflow-hidden border border-zinc-800 hover:border-zinc-600 transition-all select-none shadow-lg"
+        className={`min-w-[140px] w-[140px] h-[240px] bg-zinc-900 rounded-[24px] relative group snap-start overflow-hidden border border-zinc-800 transition-all select-none shadow-xl hover:shadow-brand-primary/10 hover:border-zinc-700 ${isDeleting ? 'opacity-50 grayscale pointer-events-none' : ''}`}
     >
       
       {/* Content Layer */}
@@ -86,44 +98,53 @@ const PulseCard: React.FC<PulseCardProps> = ({ pulse, currentUserId, onDelete, o
           {pulse.content_type === 'video' ? (
               <VideoPlayer src={pulse.content} className="w-full h-full object-cover" muted loop />
           ) : pulse.content_type === 'image' ? (
-              <img src={pulse.content} alt="Pulse" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity" />
+              <img src={pulse.content} alt="Pulse" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
           ) : (
-             <div className="w-full h-full p-4 flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-900">
-                 <p className="text-zinc-300 text-xs font-medium text-center line-clamp-6">{pulse.content}</p>
+             <div className="w-full h-full p-5 flex items-center justify-center bg-gradient-to-br from-zinc-800 to-zinc-950">
+                 <p className="text-zinc-200 text-sm font-medium text-center line-clamp-6 leading-relaxed italic">"{pulse.content}"</p>
              </div>
           )}
       </div>
 
       {/* Overlay Gradient */}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/80 pointer-events-none"></div>
+      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/90 pointer-events-none"></div>
 
       {/* Double Click Heart Animation */}
       <div className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-all duration-300 ${showHeartOverlay ? 'opacity-100 scale-100' : 'opacity-0 scale-50'}`}>
-          <Heart size={48} className="fill-white text-white drop-shadow-2xl animate-pulse" />
+          <Heart size={48} className="fill-brand-primary text-brand-primary drop-shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-bounce" />
       </div>
 
       {/* Header */}
-      <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none">
-          <div className="w-8 h-8 rounded-full border border-white/20 overflow-hidden pointer-events-auto cursor-pointer shadow-lg hover:scale-110 transition-transform" onClick={(e) => { e.stopPropagation(); onClickProfile(pulse.user_id); }}>
-              <img src={pulse.user_avatar} className="w-full h-full object-cover" />
+      <div className="absolute top-3 left-3 right-3 flex justify-between items-start pointer-events-none z-20">
+          <div className="w-8 h-8 rounded-full border border-white/20 p-[1px] overflow-hidden pointer-events-auto cursor-pointer shadow-lg hover:scale-105 transition-transform bg-black" onClick={(e) => { e.stopPropagation(); onClickProfile(pulse.user_id); }}>
+              <img src={pulse.user_avatar} className="w-full h-full rounded-full object-cover" />
           </div>
-          <div className="bg-black/40 backdrop-blur-md px-1.5 py-0.5 rounded text-[9px] font-bold text-white border border-white/10">
-              {timeAgo}
+          <div className="flex gap-2 items-start">
+              <span className="flex items-center gap-1 text-[8px] text-white bg-black/40 backdrop-blur px-1.5 py-0.5 rounded font-mono">
+                  <Eye size={8} /> {pulse.views_count || 0}
+              </span>
+              {isOwner && (
+                 <button onClick={handleDelete} className="bg-black/50 backdrop-blur-md p-1.5 rounded-full text-zinc-400 hover:text-red-500 hover:bg-red-500/20 border border-white/10 pointer-events-auto transition-colors">
+                     {isDeleting ? <Loader2 size={12} className="animate-spin"/> : <Trash2 size={12}/>}
+                 </button>
+              )}
           </div>
       </div>
 
       {/* Footer Actions */}
-      <div className="absolute bottom-0 w-full p-2 flex flex-col gap-1 z-10 pointer-events-none">
-          <p onClick={(e) => { e.stopPropagation(); onClickProfile(pulse.user_id); }} className="text-[10px] font-bold text-white truncate pl-1 pointer-events-auto cursor-pointer hover:underline">{pulse.user_name}</p>
+      <div className="absolute bottom-0 w-full p-3 flex flex-col gap-2 z-20 pointer-events-none">
+          <div className="flex items-center justify-between">
+             <p onClick={(e) => { e.stopPropagation(); onClickProfile(pulse.user_id); }} className="text-xs font-bold text-white truncate pointer-events-auto cursor-pointer hover:underline shadow-black drop-shadow-md">{pulse.user_name}</p>
+             <span className="text-[9px] text-zinc-400 font-mono flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded-md border border-white/5"><Clock size={8}/>{timeAgo}</span>
+          </div>
           
-          <div className="flex items-center justify-between bg-zinc-900/90 backdrop-blur-md rounded-xl p-1.5 border border-white/5 pointer-events-auto">
-              <div className="flex gap-2">
-                 <button onClick={(e) => handleReaction(e, 'heart')} className={`transition-transform hover:scale-110 ${myReaction === 'heart' ? 'text-pink-500' : 'text-zinc-500'}`}><Heart size={14} className={myReaction === 'heart' ? 'fill-current' : ''}/></button>
-                 <button onClick={(e) => handleReaction(e, 'fire')} className={`transition-transform hover:scale-110 ${myReaction === 'fire' ? 'text-orange-500' : 'text-zinc-500'}`}><Flame size={14} className={myReaction === 'fire' ? 'fill-current' : ''}/></button>
-              </div>
-              {isOwner && (
-                  <button onClick={handleDelete} className="text-zinc-600 hover:text-red-500"><Trash2 size={12}/></button>
-              )}
+          <div className="flex items-center gap-1 pointer-events-auto">
+             <button onClick={(e) => handleReaction(e, 'heart')} className={`flex-1 h-8 rounded-xl flex items-center justify-center gap-1 bg-white/10 backdrop-blur-md border border-white/10 hover:bg-white/20 transition-all ${myReaction === 'heart' ? 'text-brand-primary border-brand-primary/50 bg-brand-primary/10' : 'text-zinc-300'}`}>
+                 <Heart size={14} className={myReaction === 'heart' ? 'fill-current' : ''}/>
+             </button>
+             <button onClick={(e) => handleReaction(e, 'fire')} className={`flex-1 h-8 rounded-xl flex items-center justify-center gap-1 bg-white/10 backdrop-blur-md border border-white/10 hover:bg-white/20 transition-all ${myReaction === 'fire' ? 'text-orange-500 border-orange-500/50 bg-orange-500/10' : 'text-zinc-300'}`}>
+                 <Flame size={14} className={myReaction === 'fire' ? 'fill-current' : ''}/>
+             </button>
           </div>
       </div>
     </div>

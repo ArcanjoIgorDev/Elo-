@@ -14,10 +14,16 @@ export interface User {
   is_deleted?: boolean;
 }
 
-export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'location';
+export interface FriendDetail extends User {
+  friendship_start: string;
+  friendship_duration_days: number;
+}
+
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'location' | 'file';
 
 export interface Message {
   id: string;
+  chat_id: string;
   sender_id: string | null;
   content: string;
   media_url?: string; 
@@ -28,6 +34,7 @@ export interface Message {
     lat: number;
     lng: number;
   };
+  is_ephemeral?: boolean; // Novo: Mensagem temporária
   context_score?: number;
 }
 
@@ -45,6 +52,7 @@ export interface Pulse {
   emotional_state?: EmotionalState;
   created_at: string;
   expires_at: string;
+  views_count: number;
 }
 
 export interface PulseReactionCounts {
@@ -55,12 +63,14 @@ export interface PulseReactionCounts {
 export interface Post {
     id: string;
     user: User;
+    user_id: string; // Campo crucial para checar propriedade
     content: string;
     media_url?: string;
-    media_type?: 'image' | 'video';
+    media_type?: 'image' | 'video' | 'audio';
     allow_comments: boolean;
     likes_count: number;
     comments_count: number;
+    views_count: number;
     created_at: string;
     liked_by_me?: boolean;
 }
@@ -69,6 +79,7 @@ export interface PostComment {
     id: string;
     post_id: string;
     user: User;
+    user_id: string; // Campo crucial para checar propriedade
     content: string;
     created_at: string;
     likes_count: number;

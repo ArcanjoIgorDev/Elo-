@@ -96,6 +96,16 @@ const AppContent: React.FC = () => {
            navigateTo(screen);
       }
   };
+  
+  // Função robusta de voltar
+  const handleBack = () => {
+      if (window.history.length > 1) {
+          window.history.back();
+      } else {
+          // Se não houver histórico, força Home
+          handleNavClick(AppScreen.HOME);
+      }
+  };
 
   const handleTriggerVibe = () => {
       setVibeTrigger(prev => prev + 1);
@@ -120,7 +130,7 @@ const AppContent: React.FC = () => {
             chatId={selectedChatId} 
             targetUser={chatTargetUser}
             initialMessage={chatInitialMessage}
-            onBack={() => window.history.back()} 
+            onBack={handleBack} 
         />
     );
   }
@@ -129,7 +139,7 @@ const AppContent: React.FC = () => {
   if (currentScreen === AppScreen.SETTINGS) {
       return (
           <SettingsScreen 
-            onBack={() => window.history.back()}
+            onBack={handleBack}
             onNavigateProfile={() => {
                 navigateTo(AppScreen.PROFILE);
             }}
@@ -142,7 +152,7 @@ const AppContent: React.FC = () => {
       return (
           <ProfileScreen 
             targetUserId={viewProfileId}
-            onBack={() => window.history.back()}
+            onBack={handleBack}
             onSettings={() => navigateTo(AppScreen.SETTINGS)}
             onStartChat={handleStartChatFromProfile}
           />

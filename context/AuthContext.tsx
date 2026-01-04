@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { User } from '../types';
 import { Session } from '@supabase/supabase-js';
@@ -14,14 +14,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Tempo limite de inatividade em milissegundos (30 minutos)
+const INACTIVITY_TIMEOUT = 30 * 60 * 1000; 
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const activityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // Check initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchFullUserProfile(session.user.id, session);
+        startActivityTimer();
       } else {
         setLoading(false);
       }
@@ -30,17 +36,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
         fetchFullUserProfile(session.user.id, session);
+        startActivityTimer();
       } else {
         setUser(null);
         setLoading(false);
+        stopActivityTimer();
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Activity Listeners
+    const handleActivity = () => resetActivityTimer();
+    window.addEventListener('mousemove', handleActivity);
+    window.addEventListener('keydown', handleActivity);
+    window.addEventListener('touchstart', handleActivity);
+    window.addEventListener('click', handleActivity);
+
+    return () => {
+      subscription.unsubscribe();
+      stopActivityTimer();
+      window.removeEventListener('mousemove', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
+      window.removeEventListener('touchstart', handleActivity);
+      window.removeEventListener('click', handleActivity);
+    };
   }, []);
 
+  const resetActivityTimer = () => {
+      if (user) {
+          if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
+          activityTimerRef.current = setTimeout(() => {
+              console.log("ELO: Auto-logout devido a inatividade.");
+              signOut();
+              alert("Sessão encerrada por segurança devido a inatividade.");
+          }, INACTIVITY_TIMEOUT);
+      }
+  };
+
+  const startActivityTimer = () => {
+      resetActivityTimer();
+  };
+
+  const stopActivityTimer = () => {
+      if (activityTimerRef.current) clearTimeout(activityTimerRef.current);
+  };
+
   const fetchFullUserProfile = async (userId: string, session: Session) => {
-      // Tenta buscar da tabela users_meta para garantir que temos bio e avatar atualizados
       const { data: meta } = await supabase
           .from('users_meta')
           .select('*')
@@ -81,7 +121,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const internalEmail = `${cleanUsername}@elo.app`;
     const avatarUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`;
 
-    // 1. Cria o usuário na Auth do Supabase
     const { data, error } = await supabase.auth.signUp({
         email: internalEmail,
         password,
@@ -97,11 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     if (error) return { data, error };
 
-    // 2. CRUCIAL: Força a inserção na tabela pública 'users_meta' caso a trigger do banco falhe ou não exista.
     if (data.user) {
-        const { error: metaError } = await supabase
-            .from('users_meta')
-            .upsert({
+        await supabase.from('users_meta').upsert({
                 user_id: data.user.id,
                 username: cleanUsername,
                 name: name,
@@ -109,16 +145,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 phone: phone,
                 bio: ''
             }, { onConflict: 'user_id' }); 
-            
-        if (metaError) {
-            console.error("Erro ao sincronizar perfil público:", metaError);
-        }
     }
     
     return { data, error };
   };
 
   const signOut = async () => {
+    stopActivityTimer();
     await supabase.auth.signOut();
     setUser(null);
   };
